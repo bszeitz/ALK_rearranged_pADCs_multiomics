@@ -1,0 +1,868 @@
+---
+title: "Histology comparisons"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+
+regenerate_results <- F
+
+log2fc_limit <- log2(1.5)
+```
+
+
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+loaded <- load("RData/HM_KEGG_Reactome_genesets.RData")
+loaded
+
+```
+
+
+# Mucin score differences
+
+
+```{r }
+# Only proteomics
+metadata <- na.omit(pROIs_lfq$Sample_annot[,c("Case", "Mucin")])
+colnames(metadata) <- c("case", "mucin")
+summary(factor(metadata$mucin))
+metadata <- metadata[metadata$mucin !=1,]
+
+metadata$mucin <- as.factor(metadata$mucin)
+if (regenerate_results){
+  lmmres <- lmmSeq(~ mucin + (1 | case), 
+                   maindata = pROIs_lfq$Expr_filt_imp[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Mucin_lmmres.RData")
+} else {
+  load("RData/Mucin_lmmres.RData")
+}
+
+Mucin_pROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                          Intercept = as.numeric(lmmres@stats$coef[,1]),
+                          Coef_mucin2 = as.numeric(lmmres@stats$coef[,2]),
+                          Coef_mucin3 = as.numeric(lmmres@stats$coef[,3]),
+                          Pvalue = as.numeric(lmmres@stats$pvals),
+                          Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                          AIC = as.numeric(lmmres@stats$res[,1]),
+                          logLik = as.numeric(lmmres@stats$res[,2]),
+                          meanExp = as.numeric(lmmres@stats$res[,3]),
+                          StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                          StdErr_mucin2 = as.numeric(lmmres@stats$stdErr[,2]),
+                          StdErr_mucin3 = as.numeric(lmmres@stats$stdErr[,3]),
+                          Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                          Df = as.numeric(lmmres@stats$Df[,1]))
+Mucin_pROIs <- merge(pROIs_lfq$Row_annot[,c("Row_name", "Gene")], Mucin_pROIs, by="Row_name")
+row.names(Mucin_pROIs) <- Mucin_pROIs$Row_name
+
+```
+
+
+```{r }
+
+Mucin_pROIs$Avr_coef <- apply(Mucin_pROIs[,c("Coef_mucin2", "Coef_mucin3")], 1, mean)
+
+#check_trend_in_lmmres <- function(lmmres_tab, ordered_column_list, log2fc_limit){
+#  
+#}
+
+Mucin_pROIs$Trend <- ""
+Mucin_pROIs$Trend <- ifelse(Mucin_pROIs$Coef_mucin2 < Mucin_pROIs$Coef_mucin3 &
+                              Mucin_pROIs$Coef_mucin2 > log2fc_limit & Mucin_pROIs$Coef_mucin3 > log2fc_limit,
+                                  "UP", Mucin_pROIs$Trend)
+Mucin_pROIs$Trend <- ifelse(abs(Mucin_pROIs$Coef_mucin2) < abs(Mucin_pROIs$Coef_mucin3) &
+                             Mucin_pROIs$Coef_mucin2 < -log2fc_limit & Mucin_pROIs$Coef_mucin3 < -log2fc_limit,
+                                  "DN", Mucin_pROIs$Trend)
+
+Mucin_pROIs$Significant <- ""
+Mucin_pROIs$Significant <- ifelse(Mucin_pROIs$Adj_Pvalue < 0.05 & Mucin_pROIs$Trend =="UP",
+                                  "UP", Mucin_pROIs$Significant)
+Mucin_pROIs$Significant <- ifelse(Mucin_pROIs$Adj_Pvalue < 0.05 & Mucin_pROIs$Trend =="DN",
+                                  "DN", Mucin_pROIs$Significant)
+
+save(Mucin_pROIs, file="RData/Mucin_pROIs_res.RData")
+
+
+```
+
+
+
+```{r , fig.width=5, fig.height=20}
+top_gene <- Mucin_pROIs[Mucin_pROIs$Significant !="","Row_name"]
+
+ggplot(pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Row_name %in% top_gene &
+                                 pROIs_lfq$Long_expr_filt_imp_scaled$Pathology !="normal" & !is.na(pROIs_lfq$Long_expr_filt_imp_scaled$Pathology),], aes(x=Mucin, y=Expr))+geom_point(aes(color=Case))+geom_smooth(method="lm")+facet_grid( rows=vars(Gene))
+
+```
+
+
+# Stromal score differences
+
+```{r }
+# Only proteomics
+metadata <- na.omit(pROIs_lfq$Sample_annot[,c("Case", "Stroma")])
+colnames(metadata) <- c("case", "stroma")
+summary(factor(metadata$stroma))
+metadata <- metadata[metadata$stroma !=0,]
+
+metadata$stroma <- as.factor(metadata$stroma)
+if (regenerate_results){
+  lmmres <- lmmSeq(~ stroma + (1 | case), # for population avr 1+ mucin + (1 | case),
+                   maindata = pROIs_lfq$Expr_filt_imp[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Stroma_lmmres.RData")
+} else {
+  load("RData/Stroma_lmmres.RData")
+}
+
+Stroma_pROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                           Intercept = as.numeric(lmmres@stats$coef[,1]),
+                           Coef_stroma2 = as.numeric(lmmres@stats$coef[,2]),
+                           Coef_stroma3 = as.numeric(lmmres@stats$coef[,3]),
+                           Pvalue = as.numeric(lmmres@stats$pvals),
+                           Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                           AIC = as.numeric(lmmres@stats$res[,1]),
+                           logLik = as.numeric(lmmres@stats$res[,2]),
+                           meanExp = as.numeric(lmmres@stats$res[,3]),
+                           StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                           StdErr_stroma2 = as.numeric(lmmres@stats$stdErr[,2]),
+                           StdErr_stroma3 = as.numeric(lmmres@stats$stdErr[,3]),
+                           Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                           Df = as.numeric(lmmres@stats$Df[,1]))
+Stroma_pROIs <- merge(pROIs_lfq$Row_annot[,c("Row_name", "Gene")], Stroma_pROIs, by="Row_name")
+row.names(Stroma_pROIs) <- Stroma_pROIs$Row_name
+
+```
+
+
+```{r }
+
+Stroma_pROIs$Avr_coef <- apply(Stroma_pROIs[,c("Coef_stroma2", "Coef_stroma3")], 1, mean)
+
+Stroma_pROIs$Trend <- ""
+Stroma_pROIs$Trend <- ifelse(Stroma_pROIs$Coef_stroma2 < Stroma_pROIs$Coef_stroma3 &
+                              Stroma_pROIs$Coef_stroma2 > log2fc_limit & Stroma_pROIs$Coef_stroma3 > log2fc_limit,
+                                  "UP", Stroma_pROIs$Trend)
+Stroma_pROIs$Trend <- ifelse(abs(Stroma_pROIs$Coef_stroma2) < abs(Stroma_pROIs$Coef_stroma3) &
+                             Stroma_pROIs$Coef_stroma2 < -log2fc_limit & Stroma_pROIs$Coef_stroma3 < -log2fc_limit,
+                                  "DN", Stroma_pROIs$Trend)
+
+Stroma_pROIs$Significant <- ""
+Stroma_pROIs$Significant <- ifelse(Stroma_pROIs$Adj_Pvalue < 0.05 & Stroma_pROIs$Trend =="UP",
+                                  "UP", Stroma_pROIs$Significant)
+Stroma_pROIs$Significant <- ifelse(Stroma_pROIs$Adj_Pvalue < 0.05 & Stroma_pROIs$Trend =="DN",
+                                  "DN", Stroma_pROIs$Significant)
+
+save(Stroma_pROIs, file="RData/Stroma_pROIs_res.RData")
+
+```
+
+
+
+```{r , fig.width=5, fig.height=10}
+top_gene <- Stroma_pROIs[Stroma_pROIs$Significant !="","Row_name"]
+
+ggplot(pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Row_name %in% top_gene &
+                                 pROIs_lfq$Long_expr_filt_imp_scaled$Pathology !="normal" & !is.na(pROIs_lfq$Long_expr_filt_imp_scaled$Pathology),], aes(x=`Stroma`, y=Expr))+geom_point(aes(color=Case))+geom_smooth(method="lm")+facet_grid( rows=vars(Gene))
+
+```
+
+
+```{r }
+
+intersect(Stroma_pROIs[Stroma_pROIs$Significant =="UP","Gene"], Mucin_pROIs[Mucin_pROIs$Significant =="UP","Gene"])
+intersect(Stroma_pROIs[Stroma_pROIs$Significant =="DN","Gene"], Mucin_pROIs[Mucin_pROIs$Significant =="DN","Gene"])
+
+```
+
+```{r }
+Mucin_pROIs_rank <- Mucin_pROIs$Avr_coef * -log10(Mucin_pROIs$Pvalue)
+names(Mucin_pROIs_rank) <- Mucin_pROIs$Gene
+hist(Mucin_pROIs_rank, breaks = 1000)
+
+
+Stroma_pROIs_rank <- Stroma_pROIs$Avr_coef * -log10(Stroma_pROIs$Pvalue)
+names(Stroma_pROIs_rank) <- Stroma_pROIs$Gene
+hist(Stroma_pROIs_rank, breaks = 1000)
+
+
+```
+
+
+
+
+# Immune score differences
+
+
+```{r }
+# Proteomics
+metadata <- na.omit(pROIs_lfq$Sample_annot[,c("Case", "TIL")])
+colnames(metadata) <- c("case", "immune")
+if (regenerate_results){
+  lmmres <- lmmSeq(~ immune + (1 | case), # for population avr 1+ mucin + (1 | case),
+                   maindata = pROIs_lfq$Expr_filt_imp[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Immune_p_lmmres.RData")
+} else {
+  load("RData/Immune_p_lmmres.RData")
+}
+
+Immune_pROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                           Intercept = as.numeric(lmmres@stats$coef[,1]),
+                           Coef_immune = as.numeric(lmmres@stats$coef[,2]),
+                           Pvalue = as.numeric(lmmres@stats$pvals),
+                           Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                           AIC = as.numeric(lmmres@stats$res[,1]),
+                           logLik = as.numeric(lmmres@stats$res[,2]),
+                           meanExp = as.numeric(lmmres@stats$res[,3]),
+                           StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                           StdErr_immun = as.numeric(lmmres@stats$stdErr[,2]),
+                           Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                           Df = as.numeric(lmmres@stats$Df[,1]))
+Immune_pROIs <- merge(Immune_pROIs, pROIs_lfq$Row_annot[,c("Row_name", "Gene")], by="Row_name")
+row.names(Immune_pROIs) <- Immune_pROIs$Row_name
+
+```
+
+
+```{r }
+
+Immune_pROIs$Significant <- ""
+Immune_pROIs$Significant <- ifelse(Immune_pROIs$Adj_Pvalue < 0.05 & Immune_pROIs$Coef_immune > 0,
+                                  "UP", Immune_pROIs$Significant)
+Immune_pROIs$Significant <- ifelse(Immune_pROIs$Adj_Pvalue < 0.05 & Immune_pROIs$Coef_immune < 0,
+                                  "DN", Immune_pROIs$Significant)
+
+
+save(Immune_pROIs, file="RData/Immune_pROIs_res.RData")
+
+
+```
+
+
+
+```{r , fig.width=5, fig.height=5}
+top_gene <- Immune_pROIs[Immune_pROIs$Significant !="","Row_name"]
+
+ggplot(pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Row_name %in% top_gene &
+                                 pROIs_lfq$Long_expr_filt_imp_scaled$Pathology !="normal" & !is.na(pROIs_lfq$Long_expr_filt_imp_scaled$Pathology),], 
+       aes(x=TIL, y=Expr))+geom_point(aes(color=Case))+geom_smooth(method="lm")+facet_grid( rows=vars(Gene))
+
+```
+
+
+
+```{r }
+# NanoString
+metadata <- na.omit(tROIs$Sample_annot[tROIs$Sample_annot$Pathology!="normal",c("Case", "Immune_score")])
+colnames(metadata) <- c("case", "immune")
+summary(factor(metadata$immune))
+metadata$immune <- as.factor(metadata$immune)
+if (regenerate_results){
+  lmmres <- lmmSeq(~ immune + (1 | case), # for population avr 1+ mucin + (1 | case),
+                   maindata = tROIs$Expr[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Immune_t_lmmres.RData")
+} else {
+  load("RData/Immune_t_lmmres.RData")
+}
+
+
+Immune_tROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                           Intercept = as.numeric(lmmres@stats$coef[,1]),
+                           Coef_immune2 = as.numeric(lmmres@stats$coef[,2]),
+                           Coef_immune3 = as.numeric(lmmres@stats$coef[,3]),
+                           Pvalue = as.numeric(lmmres@stats$pvals),
+                           Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                           AIC = as.numeric(lmmres@stats$res[,1]),
+                           logLik = as.numeric(lmmres@stats$res[,2]),
+                           meanExp = as.numeric(lmmres@stats$res[,3]),
+                           StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                           StdErr_immune2 = as.numeric(lmmres@stats$stdErr[,2]),
+                           StdErr_immune3 = as.numeric(lmmres@stats$stdErr[,3]),
+                           Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                           Df = as.numeric(lmmres@stats$Df[,1]))
+row.names(Immune_tROIs) <- Immune_tROIs$Row_name
+
+```
+
+
+
+```{r }
+
+Immune_tROIs$Avr_coef <- apply(Immune_tROIs[,c("Coef_immune2", "Coef_immune3")], 1, mean)
+
+Immune_tROIs$Trend <- ""
+Immune_tROIs$Trend <- ifelse(Immune_tROIs$Coef_immune2 < Immune_tROIs$Coef_immune3 &
+                              Immune_tROIs$Coef_immune2 > log2fc_limit & Immune_tROIs$Coef_immune3 > log2fc_limit,
+                                  "UP", Immune_tROIs$Trend)
+Immune_tROIs$Trend <- ifelse(abs(Immune_tROIs$Coef_immune2) < abs(Immune_tROIs$Coef_immune3) &
+                             Immune_tROIs$Coef_immune2 < -log2fc_limit & Immune_tROIs$Coef_immune3 < -log2fc_limit,
+                                  "DN", Immune_tROIs$Trend)
+
+Immune_tROIs$Significant <- ""
+Immune_tROIs$Significant <- ifelse(Immune_tROIs$Adj_Pvalue < 0.05 & Immune_tROIs$Trend =="UP",
+                                  "UP", Immune_tROIs$Significant)
+Immune_tROIs$Significant <- ifelse(Immune_tROIs$Adj_Pvalue < 0.05 & Immune_tROIs$Trend =="DN",
+                                  "DN", Immune_tROIs$Significant)
+
+save(Immune_tROIs, file="RData/Immune_tROIs_res.RData")
+
+
+```
+
+
+
+```{r , fig.width=5, fig.height=5}
+top_gene <- Immune_tROIs[Immune_tROIs$Significant !="","Row_name"]
+
+ggplot(tROIs$Long_expr[tROIs$Long_expr$Gene %in% top_gene &
+                                 tROIs$Long_expr$Pathology !="normal" & !is.na(tROIs$Long_expr$Pathology),], aes(x=Immune_score, y=Expr))+geom_point(aes(color=Case))+geom_smooth(method="lm")+facet_grid( rows=vars(Gene))
+
+```
+
+
+
+```{r }
+Immune_pROIs_rank <- Immune_pROIs$Coef_immune * -log10(Immune_pROIs$Pvalue)
+names(Immune_pROIs_rank) <- Immune_pROIs$Gene
+hist(Immune_pROIs_rank, breaks = 1000)
+
+
+Immune_tROIs_rank <- Immune_tROIs$Avr_coef * -log10(Immune_tROIs$Pvalue)
+names(Immune_tROIs_rank) <- Immune_tROIs$Row_name
+hist(Immune_tROIs_rank, breaks = 1000)
+
+
+```
+
+
+# Tumor vs NAT comparison
+
+
+```{r }
+# Proteomics
+Cases_with_normal <- unique(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Type =="NAT","Case"])
+tumor <- row.names(pROIs_lfq$Sample_annot[ pROIs_lfq$Sample_annot$Case %in% Cases_with_normal&
+                                          pROIs_lfq$Sample_annot$Type =="tumor",])
+normal <- row.names(pROIs_lfq$Sample_annot[ pROIs_lfq$Sample_annot$Case %in% Cases_with_normal&
+                                          pROIs_lfq$Sample_annot$Type =="NAT",])
+group <- c(rep("0", length(normal)), rep("1", length(tumor)))
+names(group) <- c(normal,tumor)
+case <- unlist(lapply(names(group), function(x){strsplit(x, split="_", fixed=T)[[1]][1]}))
+
+metadata <- data.frame(tumor = group,
+                       case = unlist(lapply(names(group), 
+                                            function(x){strsplit(x, split="_", fixed=T)[[1]][1]})),
+                       row.names = names(group))
+if (regenerate_results){
+  lmmres <- lmmSeq(~ tumor + (1 | case), # ~ tumor + (1 | case),
+                   maindata = pROIs_lfq$Expr_filt_imp[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Tumor_p_lmmres.RData")
+} else {
+  load("RData/Tumor_p_lmmres.RData")
+}
+
+
+Tumor_pROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                          Intercept = as.numeric(lmmres@stats$coef[,1]),
+                          Coef_tumor = as.numeric(lmmres@stats$coef[,2]),
+                          Pvalue = as.numeric(lmmres@stats$pvals),
+                          Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                          AIC = as.numeric(lmmres@stats$res[,1]),
+                          logLik = as.numeric(lmmres@stats$res[,2]),
+                          meanExp = as.numeric(lmmres@stats$res[,3]),
+                          StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                          StdErr_tumor = as.numeric(lmmres@stats$stdErr[,2]),
+                          Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                          Df = as.numeric(lmmres@stats$Df[,1]))
+Tumor_pROIs <- merge(Tumor_pROIs, pROIs_lfq$Row_annot[,c("Row_name", "Gene")], by="Row_name")
+row.names(Tumor_pROIs) <- Tumor_pROIs$Row_name
+
+Tumor_pROIs$Significant <- ""
+Tumor_pROIs$Significant <- ifelse(Tumor_pROIs$Coef_tumor > log2fc_limit & Tumor_pROIs$Adj_Pvalue < 0.05, "UP", Tumor_pROIs$Significant)
+Tumor_pROIs$Significant <- ifelse(Tumor_pROIs$Coef_tumor < -log2fc_limit & Tumor_pROIs$Adj_Pvalue < 0.05, "DN", Tumor_pROIs$Significant)
+
+save(Tumor_pROIs, file="RData/Tumor_pROIs_res.RData")
+
+
+# NanoString
+Cases_with_normal <- unique(tROIs$Sample_annot[tROIs$Sample_annot$Type =="NAT","Case"])
+tumor <- row.names(tROIs$Sample_annot[ tROIs$Sample_annot$Case %in% Cases_with_normal&
+                                          tROIs$Sample_annot$Type =="tumor",])
+normal <- row.names(tROIs$Sample_annot[ tROIs$Sample_annot$Case %in% Cases_with_normal&
+                                          tROIs$Sample_annot$Type =="NAT",])
+group <- c(rep("0", length(normal)), rep("1", length(tumor)))
+names(group) <- c(normal,tumor)
+case <- unlist(lapply(names(group), function(x){strsplit(x, split="_", fixed=T)[[1]][1]}))
+
+metadata <- data.frame(tumor = group,
+                       case = unlist(lapply(names(group), 
+                                            function(x){strsplit(x, split="_", fixed=T)[[1]][1]})),
+                       row.names = names(group))
+if (regenerate_results){
+  lmmres <- lmmSeq(~ tumor + (1 | case), # ~ tumor + (1 | case),
+                   maindata = tROIs$Expr[,row.names(metadata)],
+                   metadata = metadata,
+                   progress = TRUE)
+  save(lmmres, file="RData/Tumor_t_lmmres.RData")
+} else {
+  load("RData/Tumor_t_lmmres.RData")
+}
+
+
+Tumor_tROIs <- data.frame(Row_name =  as.vector(row.names(lmmres@stats$coef)),
+                          Intercept = as.numeric(lmmres@stats$coef[,1]),
+                          Coef_tumor = as.numeric(lmmres@stats$coef[,2]),
+                          Pvalue = as.numeric(lmmres@stats$pvals),
+                          Adj_Pvalue = p.adjust(as.numeric(lmmres@stats$pvals), method = "BH"),
+                          AIC = as.numeric(lmmres@stats$res[,1]),
+                          logLik = as.numeric(lmmres@stats$res[,2]),
+                          meanExp = as.numeric(lmmres@stats$res[,3]),
+                          StdErr_intercept = as.numeric(lmmres@stats$stdErr[,1]),
+                          StdErr_tumor = as.numeric(lmmres@stats$stdErr[,2]),
+                          Chisq = as.numeric(lmmres@stats$Chisq[,1]),
+                          Df = as.numeric(lmmres@stats$Df[,1]))
+row.names(Tumor_tROIs) <- Tumor_tROIs$Row_name
+
+Tumor_tROIs$Significant <- ""
+Tumor_tROIs$Significant <- ifelse(Tumor_tROIs$Coef_tumor > log2fc_limit & Tumor_tROIs$Adj_Pvalue < 0.05, "UP", Tumor_tROIs$Significant)
+Tumor_tROIs$Significant <- ifelse(Tumor_tROIs$Coef_tumor < -log2fc_limit & Tumor_tROIs$Adj_Pvalue < 0.05, "DN", Tumor_tROIs$Significant)
+
+save(Tumor_tROIs, file="RData/Tumor_tROIs_res.RData")
+
+
+```
+
+
+
+
+```{r }
+
+#intersect(Tumor_pROIs[Tumor_pROIs$Significant =="UP","Gene"],
+#          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"])
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="UP","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"]), collapse = ", ")
+
+
+#intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+#          Tumor_tROIs[Tumor_tROIs$Significant =="DN","Row_name"])
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="DN","Row_name"]), collapse = ", ")
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"]), collapse = ", ")
+
+```
+
+
+```{r }
+
+Tumor_tROIs_rank <- Tumor_tROIs$Coef_tumor * -log10(Tumor_tROIs$Pvalue)
+names(Tumor_tROIs_rank) <- Tumor_tROIs$Row_name
+hist(Tumor_tROIs_rank, breaks = 1000)
+
+Tumor_pROIs_rank <- Tumor_pROIs$Coef_tumor * -log10(Tumor_pROIs$Pvalue)
+names(Tumor_pROIs_rank) <- Tumor_pROIs$Gene
+hist(Tumor_pROIs_rank, breaks = 1000)
+
+```
+
+# GSEA
+
+```{r }
+
+ranks <- list(Mucin_pROIs = Mucin_pROIs_rank,
+              Stroma_pROIs = Stroma_pROIs_rank,
+              Immune_pROIs = Immune_pROIs_rank,
+              Immune_tROIs = Immune_tROIs_rank,
+              Tumor_pROIs = Tumor_pROIs_rank,
+              Tumor_tROIs = Tumor_tROIs_rank)
+
+```
+
+
+
+```{r }
+
+
+if (regenerate_results){
+  
+  GSEA_results_matrix <- as.data.frame(matrix(nrow=0, ncol=12))
+  colnames(GSEA_results_matrix) <- c("Data", "ID" ,"Description" ,
+                                     "setSize" ,"enrichmentScore" ,
+                                     "NES" ,"pvalue" , "p.adjust", "qvalues" ,
+                                     "rank","leading_edge","core_enrichment")
+  
+  i=1
+  for (i in 1:length(ranks)){
+    
+    rank <- na.omit(ranks[[i]])
+    rank <- rank[names(rank) !=""]
+    rank <- sort(rank, decreasing = TRUE)
+    #print(hist(rank))
+    set.seed(12345)
+    Res_gsea <- GSEA(rank, TERM2GENE=genesets_for_gsea, verbose=FALSE, pvalueCutoff = 1.0, eps = 0, seed = TRUE)
+    Res_gsea@result$Data <- names(ranks)[i]
+    GSEA_results_matrix <- rbind(GSEA_results_matrix, 
+                                 Res_gsea@result[,colnames(GSEA_results_matrix)])
+    
+  }
+  
+  save(GSEA_results_matrix, file="RData/Histology_comparisons_pGSEA.RData")
+  
+} else {
+  load("RData/Histology_comparisons_pGSEA.RData")
+}
+
+
+
+```
+
+
+
+
+```{r }
+
+wb <- createWorkbook(
+    title = NULL,
+  )
+  sheetnames <- c("Tumor_vs_NAT_pROIs", "Tumor_vs_NAT_tROIs", 
+                  "Immune_pROIs", "Immune_tROIs", 
+                  "Mucin_pROIs", "Stroma_pROIs",
+                  "pGSEA_results")
+  sheets <- list(Tumor_pROIs[order(Tumor_pROIs$Pvalue),], Tumor_tROIs[order(Tumor_tROIs$Pvalue),], 
+                 Immune_pROIs[order(Immune_pROIs$Pvalue),], Immune_tROIs[order(Immune_tROIs$Pvalue),], 
+                 Mucin_pROIs[order(Mucin_pROIs$Pvalue),], Stroma_pROIs[order(Stroma_pROIs$Pvalue),], 
+                 GSEA_results_matrix[order(GSEA_results_matrix$pvalue),])
+  
+  for (j in 1:length(sheets)) {
+    addWorksheet(wb, sheetnames[j])
+    writeData(
+      wb = wb,
+      sheet = sheetnames[j],
+      x = sheets[[j]])
+  }
+  saveWorkbook(wb, "Suppl_tables/TableS4_Histology_comparisons.xlsx", overwrite = TRUE) 
+
+```
+
+
+# GSEA results - Summary 2D plots
+
+
+```{r }
+
+ids <- GSEA_results_matrix[GSEA_results_matrix$Data =="Tumor_pROIs" &
+                                           GSEA_results_matrix$p.adjust < 0.05,"ID"]
+xdata <- "Tumor_P"
+ydata <- "Tumor_T"
+
+gsea_2d_plot_df <- function(ids, xdata, ydata, description.column){
+  
+  columns.needed <- c("ID","NES","pvalue","p.adjust", "core_enrichment" ,"setSize" ,"enrichmentScore","qvalues", "rank","leading_edge")
+  
+  subdf <- merge(GSEA_results_matrix[GSEA_results_matrix$Data ==xdata &
+                                                   GSEA_results_matrix$ID %in% ids,columns.needed],
+                 GSEA_results_matrix[GSEA_results_matrix$Data ==ydata &
+                                                   GSEA_results_matrix$ID %in% ids,columns.needed], by="ID", all=T)
+  
+  subdf$NES.x <- ifelse(is.na(subdf$NES.x), 0, subdf$NES.x)
+  subdf$NES.y <- ifelse(is.na(subdf$NES.y), 0, subdf$NES.y)
+  subdf$enrichmentScore.x <- ifelse(is.na(subdf$enrichmentScore.x), 0, subdf$enrichmentScore.x)
+  subdf$enrichmentScore.y <- ifelse(is.na(subdf$enrichmentScore.y), 0, subdf$enrichmentScore.y)
+  
+  subdf$pvalue.x <- ifelse(is.na(subdf$pvalue.x), 1, subdf$pvalue.x)
+  subdf$pvalue.y <- ifelse(is.na(subdf$pvalue.y), 1, subdf$pvalue.y)
+  subdf$p.adjust.x <- ifelse(is.na(subdf$p.adjust.x), 1, subdf$p.adjust.x)
+  subdf$p.adjust.y <- ifelse(is.na(subdf$p.adjust.y), 1, subdf$p.adjust.y)
+  subdf$qvalues.x <- ifelse(is.na(subdf$qvalues.x), 1, subdf$qvalues.x)
+  subdf$qvalues.y <- ifelse(is.na(subdf$qvalues.y), 1, subdf$qvalues.y)
+  
+  subdf$core_enrichment.x <- ifelse(is.na(subdf$core_enrichment.x), "", subdf$core_enrichment.x)
+  subdf$core_enrichment.y <- ifelse(is.na(subdf$core_enrichment.y), "", subdf$core_enrichment.y)
+  subdf$leading_edge.x <- ifelse(is.na(subdf$leading_edge.x), "", subdf$leading_edge.x)
+  subdf$leading_edge.y <- ifelse(is.na(subdf$leading_edge.y), "", subdf$leading_edge.y)
+  
+  subdf$setSize.x <- ifelse(is.na(subdf$setSize.x), 0, subdf$setSize.x)
+  subdf$setSize.y <- ifelse(is.na(subdf$setSize.y), 0, subdf$setSize.y)
+  subdf$rank.x <- ifelse(is.na(subdf$rank.x), 0, subdf$rank.x)
+  subdf$rank.y <- ifelse(is.na(subdf$rank.y), 0, subdf$rank.y)
+  
+  #ROWNR <- 1
+  subdf$core_enrichment_common <- sapply(seq(1,nrow(subdf)), function(ROWNR){
+    v1 <- strsplit(subdf[ROWNR,"core_enrichment.x"], split="/", fixed=T)[[1]]
+    v2 <- strsplit(subdf[ROWNR,"core_enrichment.y"], split="/", fixed=T)[[1]]
+    common <- intersect(v1,v2)
+    
+    return(paste(common, collapse = "/"))
+  })
+  
+  
+  column.order <- c("ID","NES.x","NES.y","pvalue.x","pvalue.y",
+                    "p.adjust.x","p.adjust.y", 
+                    "core_enrichment.x", "core_enrichment.y", "core_enrichment_common",
+                    "setSize.x" ,"setSize.y" ,
+                    "enrichmentScore.x","enrichmentScore.y","qvalues.x","qvalues.y", 
+                    "rank.x","rank.y","leading_edge.x","leading_edge.y")
+  subdf <- subdf[,column.order]
+  
+  #colnames(subdf) <- gsub(".x", paste0("_",xdata), colnames(subdf), fixed=T)
+  #colnames(subdf) <- gsub(".y", paste0("_",ydata), colnames(subdf), fixed=T)
+  
+  subdf <- cbind(description.column, subdf)
+  colnames(subdf)[1] <- "Description"
+  
+  return(subdf)
+  
+}
+
+
+pcutoff <- 0.05
+
+tumor_gsea <- gsea_2d_plot_df(c(GSEA_results_matrix[GSEA_results_matrix$Data =="Tumor_pROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"],
+                                GSEA_results_matrix[GSEA_results_matrix$Data =="Tumor_tROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"]), "Tumor_pROIs", "Tumor_tROIs", "Tumor-specific signatures\npROIs vs tROIs")
+
+immune_gsea <- gsea_2d_plot_df(c(GSEA_results_matrix[GSEA_results_matrix$Data =="Immune_pROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"],
+                                 GSEA_results_matrix[GSEA_results_matrix$Data =="Immune_tROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"]), "Immune_pROIs", "Immune_tROIs", "Immune infiltration signatures\npROIs vs tROIs")
+
+mucin_stroma_gsea <- gsea_2d_plot_df(c(GSEA_results_matrix[GSEA_results_matrix$Data =="Mucin_pROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"],
+                                 GSEA_results_matrix[GSEA_results_matrix$Data =="Stroma_pROIs" &
+                                           GSEA_results_matrix$p.adjust < pcutoff,"ID"]), "Mucin_pROIs", "Stroma_pROIs", "Stroma vs mucin signatures\ninpROIs")
+
+
+```
+
+
+```{r }
+
+gsea_plots <- rbind(tumor_gsea, immune_gsea, mucin_stroma_gsea)
+gsea_plots$significance <- "ns"
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x < 0.05 & gsea_plots$pvalue.y < 0.05 &  
+                                    gsea_plots$NES.x > 0 & gsea_plots$NES.y > 0, "both up", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x < 0.05 & gsea_plots$pvalue.y < 0.05 &  
+                                    gsea_plots$NES.x < 0 & gsea_plots$NES.y < 0, "both dn", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x < 0.05 & gsea_plots$pvalue.y < 0.05 &  
+                                    ((gsea_plots$NES.x > 0 & gsea_plots$NES.y < 0) |
+                                       (gsea_plots$NES.x < 0 & gsea_plots$NES.y > 0)) , "opposite", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x < 0.05 & gsea_plots$pvalue.y > 0.05 &
+                                    gsea_plots$NES.x > 0, "only x up", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x < 0.05 & gsea_plots$pvalue.y > 0.05 &
+                                    gsea_plots$NES.x < 0, "only x dn", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x > 0.05 & gsea_plots$pvalue.y < 0.05 &
+                                    gsea_plots$NES.y > 0, "only y up", gsea_plots$significance)
+gsea_plots$significance <- ifelse(gsea_plots$pvalue.x > 0.05 & gsea_plots$pvalue.y < 0.05 &
+                                    gsea_plots$NES.y < 0, "only y dn", gsea_plots$significance)
+
+gsea_plots$Description <- factor(gsea_plots$Description, levels = unique(gsea_plots$Description))
+
+```
+
+
+```{r , fig.width=25, fig.height=39}
+
+ggplot(gsea_plots, aes(x = NES.x, y=NES.y, color=significance, label=ID))+geom_point()+
+  geom_hline(yintercept = 0, linetype="dashed", color="grey")+geom_vline(xintercept = 0, linetype="dashed", color="grey")+
+  xlim(-3,3)+ylim(-3,3)+ geom_text_repel(max.overlaps = 100000)+
+  theme_bw()+ 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ scale_color_manual(values=c("dodgerblue3","firebrick3","#c5fffdff",                                                                                                  "#ffbcd6ff","#cbffd1ff","#ffe6bcff","black","blue"))+
+  facet_wrap(~Description,  ncol=1, scales = "free")
+
+
+ggsave("Figures/GSEA_results_detailed.pdf")
+
+```
+
+
+```{r }
+to_highlight_tumor_vs_NAT <- data.frame(ID = c("KEGG_COMPLEMENT_AND_COAGULATION_CASCADES",
+                                               "REACTOME_TOLL_LIKE_RECEPTOR_TLR1_TLR2_CASCADE",
+                                               "HALLMARK_HEME_METABOLISM",
+                                               "REACTOME_PLATELET_AGGREGATION_PLUG_FORMATION",
+                                               "REACTOME_SIGNALING_BY_MET",
+                                               "REACTOME_SIGNALING_BY_RECEPTOR_TYROSINE_KINASES",
+                                               "HALLMARK_APICAL_JUNCTION",
+                                               "REACTOME_MAPK_FAMILY_SIGNALING_CASCADES",
+                                               "REACTOME_CELL_CELL_COMMUNICATION",
+                                               "REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION",
+                                               "REACTOME_SIGNALING_BY_PDGF",
+                                               "REACTOME_MET_ACTIVATES_PTK2_SIGNALING",
+                                               "HALLMARK_GLYCOLYSIS",
+                                               "REACTOME_INFECTIOUS_DISEASE",
+                                               "HALLMARK_MTORC1_SIGNALING",
+                                               "HALLMARK_UNFOLDED_PROTEIN_RESPONSE",
+                                               "REACTOME_METABOLISM_OF_RNA",
+                                               "REACTOME_CELLULAR_RESPONSE_TO_STARVATION",
+                                               "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+                                               "REACTOME_METABOLISM_OF_AMINO_ACIDS_AND_DERIVATIVES",
+                                               "REACTOME_TRANSLATION"),
+                                        Label = c("Complement and\ncoagulation cascades",
+                                               "Toll-like receptor\nTLR1:TLR2 cascade",
+                                               "Heme\nmetabolism",
+                                               "Platelet\naggregation",
+                                               "Signaling by MET",
+                                               "Signaling by RTKs",
+                                               "Apical junction",
+                                               "MAPK family\nsignaling cascades",
+                                               "Cell-cell communication",
+                                               "ECM organization",
+                                               "Signaling by PDGF",
+                                               "MET activates PTK2 signaling",
+                                               "Glycolysis",
+                                               "Infectious\ndisease",
+                                               "MTORC1 signaling",
+                                               "Unfolded protein\nresponse",
+                                               "Metabolism of RNA",
+                                               "Cellular response\nto starvation",
+                                               "Signaling by ROBO receptors",
+                                               "Metabolism of AAs and derivatives",
+                                               "Translation"))
+to_highlight_tumor_vs_NAT$Description <- "Tumor-specific signatures\npROIs vs tROIs"
+
+
+```
+
+
+```{r }
+to_highlight_immune<- data.frame(ID = c("KEGG_ANTIGEN_PROCESSING_AND_PRESENTATION",
+                                               "REACTOME_INTERFERON_SIGNALING",
+                                               "REACTOME_TCR_SIGNALING",
+                                               "KEGG_CELL_ADHESION_MOLECULES_CAMS",
+                                               "REACTOME_SIGNALING_BY_THE_B_CELL_RECEPTOR_BCR",
+                                               "REACTOME_IMMUNOREGULATORY_INTERACTIONS_BETWEEN_A_LYMPHOID_AND_A_NON_LYMPHOID_CELL",
+                                               "KEGG_LEUKOCYTE_TRANSENDOTHELIAL_MIGRATION",
+                                               "REACTOME_INTERLEUKIN_3_INTERLEUKIN_5_AND_GM_CSF_SIGNALING",
+                                               "REACTOME_INTERLEUKIN_2_FAMILY_SIGNALING",
+                                               "KEGG_NATURAL_KILLER_CELL_MEDIATED_CYTOTOXICITY",
+                                               "REACTOME_NEUTROPHIL_DEGRANULATION",
+                                               "REACTOME_SIGNALING_BY_WNT_IN_CANCER",
+                                               "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION",
+                                               "REACTOME_MET_ACTIVATES_PTK2_SIGNALING",
+                                               "REACTOME_NON_INTEGRIN_MEMBRANE_ECM_INTERACTIONS",
+                                               "REACTOME_COLLAGEN_FORMATION",
+                                               "REACTOME_ECM_PROTEOGLYCANS"),
+                                        Label = c("Antigen processing\nand presentation",
+                                               "Interferon signaling",
+                                               "TCR signaling",
+                                               "Cell adhesion molecules",
+                                               "Signaling by the B cell receptor",
+                                               "Immunoregulatory interactions\nbtw. a lymphoid and\nnon-lymphoid cell",
+                                               "Leukocyte\ntransendothelial migration",
+                                               "Interleukin-3, Interleukin-5\nand GM-CSF signaling",
+                                               "Interleukin-2\nfamily signaling",
+                                               "Natural killer\ncell-mediated cytotoxicity",
+                                               "Neutrophil degranulation",
+                                               "Signaling by WNT in cancer",
+                                               "EMT",
+                                               "MET activates\nPTK2 signaling",
+                                               "Non-integrin membrane-ECM interactions",
+                                               "Collagen formation",
+                                               "ECM proteoglycans"))
+to_highlight_immune$Description <- "Immune infiltration signatures\npROIs vs tROIs"
+
+
+```
+
+
+```{r }
+to_highlight_mucin_stroma<- data.frame(ID = c("REACTOME_METABOLISM_OF_RNA",
+                                               "REACTOME_SIGNALING_BY_ROBO_RECEPTORS",
+                                               "REACTOME_TRANSLATION",
+                                               "REACTOME_RESPONSE_TO_ELEVATED_PLATELET_CYTOSOLIC_CA2",
+                                               "REACTOME_METABOLISM_OF_CARBOHYDRATES",
+                                               "REACTOME_INFECTIOUS_DISEASE",
+                                               "REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION",
+                                               "HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION",
+                                               "KEGG_FOCAL_ADHESION",
+                                               "REACTOME_SIGNALING_BY_RECEPTOR_TYROSINE_KINASES",
+                                               "REACTOME_CELL_SURFACE_INTERACTIONS_AT_THE_VASCULAR_WALL",
+                                               "REACTOME_PLATELET_ACTIVATION_SIGNALING_AND_AGGREGATION",
+                                               "REACTOME_HEMOSTASIS",
+                                               "HALLMARK_COAGULATION"),
+                                        Label = c("Metabolism of RNA",
+                                               "Signaling by\nROBO receptors",
+                                               "Translation",
+                                               "Response to elevated\nplatelet cytosolic Ca2+",
+                                               "Metabolism of carbohydrates",
+                                               "Infectious disease",
+                                               "ECM organization",
+                                               "EMT",
+                                               "Focal adhesion",
+                                               "Signaling by RTKs",
+                                               "Cell surface interactions\nat the vascular wall",
+                                               "Platelet activation,\nsignaling and aggregation",
+                                               "Hemostasis",
+                                               "Coagulation"))
+to_highlight_mucin_stroma$Description <- "Stroma vs mucin signatures\ninpROIs"
+
+
+```
+
+
+
+```{r }
+gsea_plots_labelled <- merge(gsea_plots, to_highlight_tumor_vs_NAT, by=c("ID", "Description"), all.x=T)
+gsea_plots_labelled <- merge(gsea_plots_labelled, to_highlight_immune, by=c("ID", "Description"), all.x=T)
+gsea_plots_labelled <- merge(gsea_plots_labelled, to_highlight_mucin_stroma, by=c("ID", "Description"), all.x=T)
+
+x <- 1
+gsea_plots_labelled$Label <- sapply(seq(1,nrow(gsea_plots_labelled)), function(x){
+  return(na.omit(unique(as.character(gsea_plots_labelled[x,c("Label", "Label.x", "Label.y")]))))
+})
+gsea_plots_labelled$Label <- gsub("character(0)","",gsea_plots_labelled$Label, fixed=T)
+gsea_plots_labelled$Label_color <- ifelse(! gsea_plots_labelled$significance %in% c("both up", "both dn" , "opposite"),
+                                 "only one", gsea_plots_labelled$significance)
+```
+
+
+```{r , fig.width=5, fig.height=8}
+
+ggplot(gsea_plots_labelled, aes(x = NES.x, y=NES.y, 
+                       fill=significance, label=Label))+geom_point(size=3.5,colour="black",pch=21)+
+  geom_hline(yintercept = 0, linetype="dashed", color="grey")+geom_vline(xintercept = 0, linetype="dashed", color="grey")+ xlim(-3,3)+ylim(-3,3)+ # 2.4
+  theme_bw()+ 
+  geom_text_repel(aes(color=Label_color),max.overlaps = 100000,
+                  min.segment.length = 0, seed=12345,force_pull = 0.5, force = 3,
+                  size=2.5)+
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+ scale_fill_manual(values=c("dodgerblue3","firebrick3","#c5fffdff",                                                                                                  "#ffbcd6ff","#cbffd1ff","#ffe6bcff","black","blue"))+
+  scale_color_manual(values=c("dodgerblue3","firebrick3","darkgrey","black"))+
+  facet_wrap(~Description, nrow=3, ncol=1, scales = "free")
+
+ggsave("Figures/GSEA_results_simple.pdf")
+
+```
+
+
+
+```{r }
+
+```
+
+
+

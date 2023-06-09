@@ -1,0 +1,290 @@
+---
+title: "Validate histology markers with CPTAC data"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+```{r}
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+loaded <- load("RData/TCGA_CPTAC.RData")
+loaded
+
+alk_samples <- c(na.omit(unique(CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$Putative.driver.mutation =="ALK-Fusion",
+                                                                 "Sample.ID"])),
+                 paste(na.omit(unique(CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$Putative.driver.mutation =="ALK-Fusion","Sample.ID"])), 
+                       "N",sep="."))
+
+CPTAC_prot_full$Long_expr_scaled$ALK <- ifelse(CPTAC_prot_full$Long_expr_scaled$Sample.ID %in% alk_samples,
+                                               "ALK-rearranged", "Other LADC")
+CPTAC_RNA_full$Long_expr_scaled$ALK <- ifelse(CPTAC_RNA_full$Long_expr_scaled$Sample.ID %in% alk_samples,
+                                              "ALK-rearranged", "Other LADC")
+
+```
+
+
+```{r }
+load("RData/Tumor_pROIs_res.RData")
+load("RData/Tumor_tROIs_res.RData")
+
+load("RData/Mucin_pROIs_res.RData")
+load("RData/Stroma_pROIs_res.RData")
+
+load("RData/Immune_pROIs_res.RData")
+load("RData/Immune_tROIs_res.RData")
+```
+
+
+
+# Tumor vs NAT
+
+
+
+```{r }
+
+
+#intersect(Tumor_pROIs[Tumor_pROIs$Significant =="UP","Gene"],
+#          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"])
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="UP","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"]), collapse = ", ")
+
+
+#intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+#          Tumor_tROIs[Tumor_tROIs$Significant =="DN","Row_name"])
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="DN","Row_name"]), collapse = ", ")
+
+paste(intersect(Tumor_pROIs[Tumor_pROIs$Significant =="DN","Gene"],
+          Tumor_tROIs[Tumor_tROIs$Significant =="UP","Row_name"]), collapse = ", ")
+
+```
+
+```{r , fig.width=7, fig.height=30}
+
+tumor_specific <- intersect(Tumor_pROIs[Tumor_pROIs$Significant!="","Gene"],
+                            Tumor_tROIs[Tumor_tROIs$Significant!="","Row_name"])
+
+
+new_table <- pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene %in% tumor.specific,
+                                          c("Sample","Gene", "Expr", "Type")]
+new_table$ALK <- "ALK-rearranged"
+new_table$Study <- "pROIs"
+new_table_2 <- tROIs$Long_expr_scaled[tROIs$Long_expr$Gene %in% tumor.specific,c("Sample","Gene", "Expr", "Type")]
+new_table_2$ALK <- "ALK-rearranged"
+new_table_2$Study <- "tROIs"
+
+CPTAC_1 <- CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$geneSymbol %in% tumor.specific,
+                             c("Sample.ID","geneSymbol", "Expr", "Type", "ALK")]
+CPTAC_1$Study <- "CPTAC_prot"
+CPTAC_2 <- CPTAC_RNA_full$Long_expr_scaled[CPTAC_RNA_full$Long_expr_scaled$id %in% tumor.specific,
+                                           c("Sample.ID","id", "Expr", "Type", "ALK")]
+CPTAC_2$Study <- "CPTAC_RNA"
+
+colnames(CPTAC_1) <- colnames(new_table_2)
+colnames(CPTAC_2) <- colnames(new_table_2)
+
+common_table <- rbind(new_table, new_table_2, CPTAC_1, CPTAC_2)
+common_table$Type <- ifelse(common_table$Type=="Tumor", "tumor", common_table$Type)
+common_table$ALK_type <- paste(common_table$ALK, common_table$Type, sep="\n")
+common_table$ALK_type <- factor(common_table$ALK_type, 
+                                levels=c("ALK-rearranged\nNAT", "ALK-rearranged\ntumor",
+                                         "Other LADC\nNAT", "Other LADC\ntumor"))
+
+ggplot(common_table[,], 
+       aes(x=ALK_type, y=Expr))+
+  stat_compare_means(comparisons  = list(c("ALK-rearranged\nNAT", "ALK-rearranged\ntumor"),
+                                         c("Other LADC\nNAT", "Other LADC\ntumor")),method="t.test", label ="p.signif",
+                     label.y = 2.5)+
+  geom_boxplot(aes(fill=ALK_type))+
+  theme_bw()+
+  facet_wrap(Gene ~ Study, ncol=4, scales = "free")+ylim(c(-3,3))+
+  
+  scale_fill_manual(values=c("#5d9560","#a22922", "#b0d18d","#e36c18"))+
+  theme(axis.text.x=element_blank(),  
+        axis.ticks.x=element_blank()  
+        )
+
+
+ggsave("Figures/Boxplots_tumor_specific.pdf")
+
+```
+
+
+
+```{r , fig.width=8, fig.height=6}
+formula <- y ~ x 
+
+top_gene <- c(Immune_pROIs[Immune_pROIs$Significant !="","Gene"],
+              Immune_tROIs[Immune_tROIs$Significant !="","Row_name"])
+
+
+new_table <- pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene %in% top_gene &
+                                     pROIs_lfq$Long_expr_filt_imp_scaled$Type =="tumor",
+                                     c("Sample","Gene", "Expr", "TIL")]
+new_table$ALK <- "ALK-rearranged"
+new_table$Study <- "pROIs"
+colnames(new_table)[4] <- "Immune_infilt"
+
+new_table_2 <- tROIs$Long_expr_scaled[tROIs$Long_expr_scaled$Gene %in% top_gene &
+                                     tROIs$Long_expr_scaled$Type =="tumor",
+                                     c("Sample","Gene", "Expr", "Immune_score")]
+new_table_2$ALK <- "ALK-rearranged"
+new_table_2$Study <- "tROIs"
+colnames(new_table_2)[4] <- "Immune_infilt"
+
+CPTAC_1 <- CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$geneSymbol %in% top_gene &
+                               CPTAC_prot_full$Long_expr_scaled$Type=="Tumor",
+                               c("Sample.ID","geneSymbol", "Expr", "ESTIMATE.ImmuneScore", "ALK")]
+CPTAC_1$Study <- "CPTAC_prot"
+CPTAC_2 <- CPTAC_RNA_full$Long_expr_scaled[CPTAC_RNA_full$Long_expr_scaled$id %in% top_gene&
+                               CPTAC_RNA_full$Long_expr_scaled$Type=="Tumor",
+                               c("Sample.ID","id", "Expr", "ESTIMATE.ImmuneScore", "ALK")]
+CPTAC_2$Study <- "CPTAC_RNA"
+
+colnames(CPTAC_1) <- colnames(new_table_2)
+colnames(CPTAC_2) <- colnames(new_table_2)
+
+common_table <- rbind(new_table, new_table_2, CPTAC_1, CPTAC_2)
+common_table$Immune_infilt <- as.numeric(common_table$Immune_infilt)
+
+ggplot(common_table, aes(x=Immune_infilt, y=Expr, color=ALK))+
+  geom_point()+geom_smooth(method="lm")+theme_bw()+
+  stat_fit_glance(method = 'lm',
+                       method.args = list(formula = formula),
+                       geom = 'text',
+                       aes(label = paste("P-value = ", signif(..p.value.., digits = 3), sep = "")))+
+  facet_wrap(Gene ~ Study, ncol=4, scales = "free")+
+  scale_color_manual(values=c("#a22922", "darkgrey"))
+
+
+ggsave("Figures/Boxplots_immune_specific.pdf")
+
+```
+
+
+
+
+
+```{r , fig.width=12, fig.height=15}
+
+top_gene <- Mucin_pROIs[Mucin_pROIs$Significant !="","Gene"]
+
+
+new_table <- pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene %in% top_gene,
+                                          c("Sample","Gene", "Expr", "Mucin")]
+new_table$ALK <- "ALK-rearranged"
+new_table$Study <- "pROIs"
+
+
+CPTAC_prot_full$Long_expr_scaled$Feature <- "Other"
+CPTAC_prot_full$Long_expr_scaled$Feature <- ifelse(CPTAC_prot_full$Long_expr_scaled$Dominant.Histological.Subtype %in% c("invasive-mucinous", "invasive-mucinous|acinar"), 
+                        "Invasive\nmucinous", CPTAC_prot_full$Long_expr_scaled$Feature)
+CPTAC_prot_full$Long_expr_scaled$Feature <- ifelse(CPTAC_prot_full$Long_expr_scaled$Type %in% c("NAT"), "NAT", CPTAC_prot_full$Long_expr_scaled$Feature)
+
+CPTAC_RNA_full$Long_expr_scaled$Feature <- "Other"
+CPTAC_RNA_full$Long_expr_scaled$Feature <- ifelse(CPTAC_RNA_full$Long_expr_scaled$Dominant.Histological.Subtype %in% c("invasive-mucinous", "invasive-mucinous|acinar"), 
+                        "Invasive\nmucinous", CPTAC_RNA_full$Long_expr_scaled$Feature)
+CPTAC_RNA_full$Long_expr_scaled$Feature <- ifelse(CPTAC_RNA_full$Long_expr_scaled$Type %in% c("NAT"), 
+                        "NAT", CPTAC_RNA_full$Long_expr_scaled$Feature)
+
+CPTAC_1 <- CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$geneSymbol %in% top_gene,
+                             c("Sample.ID","geneSymbol", "Expr", "Feature", "ALK")]
+CPTAC_1$Study <- "CPTAC_prot"
+CPTAC_2 <- CPTAC_RNA_full$Long_expr_scaled[CPTAC_RNA_full$Long_expr_scaled$id %in% top_gene,
+                                           c("Sample.ID","id", "Expr", "Feature", "ALK")]
+CPTAC_2$Study <- "CPTAC_RNA"
+
+colnames(CPTAC_1) <- colnames(new_table)
+colnames(CPTAC_2) <- colnames(new_table)
+
+common_table <- rbind(new_table, CPTAC_1, CPTAC_2)
+common_table <- common_table[common_table$Mucin !="NAT" &
+                               !is.na(common_table$Mucin),]
+unique(common_table$Mucin)
+common_table$Mucin <- ifelse(common_table$Mucin =="Invasive\nmucinous"| common_table$Mucin =="2" |
+                               common_table$Mucin == "3", "Mucin high",
+                             common_table$Mucin)
+common_table$Mucin <- ifelse(common_table$Mucin =="Other" | common_table$Mucin =="0" |
+                               common_table$Mucin == "1", "Mucin low",
+                             common_table$Mucin)
+common_table$Mucin <- factor(common_table$Mucin, levels=c("Mucin low", "Mucin high"))
+#common_table$ALK_morphology <- paste(common_table$ALK, common_table$Mucin, sep="\n")
+#common_table$ALK_morphology <- factor(common_table$ALK_morphology, 
+#                                levels=c("ALK-rearranged\nOther", "ALK-rearranged\nInvasive\nmucinous",
+#                                         "Other LADC\nNAT", "Other LADC\ntumor"))
+#
+#common_table$Gene %in% c("C3", "COL1A1", "C4BPA", "CLU", "LAMB3")
+ggplot(common_table[,], 
+       aes(x=Mucin, y=Expr))+
+  stat_compare_means(comparisons  = list(c("Mucin low", "Mucin high")),
+                     method="t.test", label ="p.signif",
+                     label.y = 2.5)+
+  geom_boxplot(aes(fill=Mucin))+
+  theme_bw()+
+  facet_wrap(Gene ~ Study, ncol=6, scales = "free")+ylim(c(-3,3))+
+  
+  scale_fill_manual(values=c("darkgrey","#238443"))+
+  theme(axis.text.x=element_blank(),  
+        axis.ticks.x=element_blank()  
+        )
+
+
+ggsave("Figures/Boxplots_mucin_specific.pdf")
+
+```
+
+
+
+
+
+```{r , fig.width=6, fig.height=6}
+formula <- y ~ x 
+
+top_gene <- c(Stroma_pROIs[Stroma_pROIs$Significant !="","Gene"])
+
+
+new_table <- pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene %in% top_gene &
+                                     pROIs_lfq$Long_expr_filt_imp_scaled$Type =="tumor",
+                                     c("Sample","Gene", "Expr", "Stroma")]
+new_table$ALK <- "ALK-rearranged"
+new_table$Study <- "pROIs"
+colnames(new_table)[4] <- "Stroma"
+
+
+CPTAC_1 <- CPTAC_prot_full$Long_expr_scaled[CPTAC_prot_full$Long_expr_scaled$geneSymbol %in% top_gene &
+                               CPTAC_prot_full$Long_expr_scaled$Type=="Tumor",
+                               c("Sample.ID","geneSymbol", "Expr", "ESTIMATE.StromalScore", "ALK")]
+CPTAC_1$Study <- "CPTAC_prot"
+CPTAC_2 <- CPTAC_RNA_full$Long_expr_scaled[CPTAC_RNA_full$Long_expr_scaled$id %in% top_gene&
+                               CPTAC_RNA_full$Long_expr_scaled$Type=="Tumor",
+                               c("Sample.ID","id", "Expr", "ESTIMATE.StromalScore", "ALK")]
+CPTAC_2$Study <- "CPTAC_RNA"
+
+colnames(CPTAC_1) <- colnames(new_table)
+colnames(CPTAC_2) <- colnames(new_table)
+
+common_table <- rbind(new_table, CPTAC_1, CPTAC_2)
+common_table$Stroma <- as.numeric(common_table$Stroma)
+
+ggplot(common_table, aes(x=Stroma, y=Expr, color=ALK))+
+  geom_point()+geom_smooth(method="lm")+theme_bw()+
+  stat_fit_glance(method = 'lm',
+                       method.args = list(formula = formula),
+                       geom = 'text',
+                       aes(label = paste("P-value = ", signif(..p.value.., digits = 3), sep = "")))+
+  facet_wrap(Gene ~ Study, ncol=3, scales = "free")+
+  scale_color_manual(values=c("#a22922", "darkgrey"))
+
+
+ggsave("Figures/Boxplots_stroma_specific.pdf")
+
+```
+
+
+
+

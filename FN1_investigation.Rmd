@@ -1,0 +1,166 @@
+---
+title: "Investigations of FN1"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+```
+
+
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+loaded <- load("RData/TCGA_CPTAC.RData")
+loaded
+
+```
+
+
+
+```{r }
+
+tumor_tROIs <- tROIs$Sample_annot[tROIs$Sample_annot$Type =="tumor","Sample"]
+tumor_pROIs <- pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Type =="tumor","Sample"]
+
+
+pROIs_mean <- mean_over_patient( pROIs_lfq$Expr_filt_imp_scaled[,tumor_pROIs],
+                                 unique(pROIs_lfq$Sample_annot$Case))
+tROIs_mean <- mean_over_patient( tROIs$Expr_scaled[,tumor_tROIs], unique(tROIs$Sample_annot$Case))
+
+
+```
+
+
+```{r }
+
+per_patient <- unique(pROIs_lfq$Sample_annot[,c("Case", "OS_years", "Status", "Drug")])
+per_patient$OS_years <- as.numeric(per_patient$OS_years)
+per_patient$Status <- as.numeric(per_patient$Status)
+
+per_patient$FN1_protein <- pROIs_mean["P02751",per_patient$Case]
+per_patient$FN1_gene <- tROIs_mean["FN1",per_patient$Case]
+
+
+summary(coxph(Surv(time = OS_years, event = Status) ~ FN1_protein + strata(Drug), data = per_patient))
+summary(coxph(Surv(time = OS_years, event = Status) ~ FN1_gene + strata(Drug), data = per_patient))
+
+#summary(coxph(Surv(time = OS_years, event = Status) ~ FN1_protein, data = per_patient))
+#summary(coxph(Surv(time = OS_years, event = Status) ~ FN1_gene, data = per_patient))
+
+```
+
+
+```{r }
+
+tcga_rna_fn1 <- TCGA_RNA_full$Sample_annot
+TCGA_RNA_full$Row_annot[TCGA_RNA_full$Row_annot$Gene=="FN1",]
+tcga_rna_fn1$FN1 <- as.numeric(TCGA_RNA_full$Expr_scaled["__FN1__1205",tcga_rna_fn1$Sample])
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = tcga_rna_fn1))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = tcga_rna_fn1[tcga_rna_fn1$ALK_TRANSLOCATION_STATUS=="YES",]))
+
+
+
+```
+
+
+```{r }
+
+tcga_rppa_fn1 <- TCGA_RPPA_full$Sample_annot
+tcga_rppa_fn1$FN1 <- as.numeric(TCGA_RPPA_full$Expr_scaled["FN1",tcga_rppa_fn1$Sample])
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = tcga_rppa_fn1))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = tcga_rppa_fn1[tcga_rppa_fn1$ALK_TRANSLOCATION_STATUS=="YES",]))
+
+
+
+```
+
+```{r }
+
+cptac_mrna_fn1 <- CPTAC_RNA_full$Sample_annot[!endsWith(CPTAC_RNA_full$Sample_annot$Sample,".N"),]
+CPTAC_RNA_full$Row_annot[CPTAC_RNA_full$Row_annot$geneSymbol=="FN1",]
+cptac_mrna_fn1$FN1 <- as.numeric(CPTAC_RNA_full$Expr_scaled["FN1_2948",cptac_mrna_fn1$Sample])
+cptac_mrna_fn1$time <- as.numeric(cptac_mrna_fn1$time)
+cptac_mrna_fn1$status <- as.numeric(cptac_mrna_fn1$status)
+cptac_mrna_fn1$stage <- as.numeric(gsub("([0-9]+).*$", "\\1", cptac_mrna_fn1$Stage))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = cptac_mrna_fn1))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 , data = cptac_mrna_fn1[cptac_mrna_fn1$ALK.fusion=="1",]))
+
+
+
+```
+
+
+```{r }
+
+cptac_prot_fn1 <- CPTAC_prot_full$Sample_annot[!endsWith(CPTAC_prot_full$Sample_annot$Sample,".N"),]
+CPTAC_prot_full$Row_annot[CPTAC_prot_full$Row_annot$geneSymbol=="FN1",]
+cptac_prot_fn1$FN1 <- as.numeric(CPTAC_prot_full$Expr_scaled["NP_997647.1",cptac_prot_fn1$Sample])
+cptac_prot_fn1$time <- as.numeric(cptac_prot_fn1$time)
+cptac_prot_fn1$status <- as.numeric(cptac_prot_fn1$status)
+cptac_prot_fn1$stage <- as.numeric(gsub("([0-9]+).*$", "\\1", cptac_prot_fn1$Stage))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 + strata(stage), data = cptac_prot_fn1))
+
+summary(coxph(Surv(time = time, event = status) ~ FN1 , data = cptac_prot_fn1[cptac_prot_fn1$ALK.fusion=="1",]))
+
+
+
+```
+
+
+```{r , fig.width=4, fig.height=1.5}
+
+dataset1 <- data.frame(Gene = "pROIs", HR = 5.228, CI_low = 0.2447, CI_high = 7) # real: CI_high = 111.7
+dataset2 <- data.frame(Gene = "tROIs", HR = 3.501, CI_low = 0.4203, CI_high = 7) # real: CI_high = 29.17
+dataset3 <- data.frame(Gene = "TCGA mRNA full", HR = 1.007271, CI_low = 0.8765, CI_high = 1.158)
+dataset4 <- data.frame(Gene = "TCGA mRNA, ALK+ subset", HR = 2.2466, CI_low = 0.7688, CI_high = 6.565)
+dataset5 <- data.frame(Gene = "TCGA RPPA full", HR = 1.12545, CI_low = 0.9469, CI_high = 1.338)
+dataset6 <- data.frame(Gene = "TCGA RPPA, ALK+ subset", HR = 1.9135, CI_low = 0.82, CI_high = 4.465)
+dataset7 <- data.frame(Gene = "CPTAC mRNA full", HR = 0.9573, CI_low = 0.6379, CI_high = 1.437)
+#dataset8 <- data.frame(Gene = "CPTAC mRNA ALK", HR = NA, CI_low = NA, CI_high = NA)
+dataset9 <- data.frame(Gene = "CPTAC prot full", HR = 1.2859, CI_low = 0.8157, CI_high = 2.027)
+#dataset10 <- data.frame(Gene = "CPTAC prot ALK", HR = NA, CI_low = NA, CI_high = NA)
+
+all_data <- rbind(dataset1, dataset2, dataset3,
+                  dataset4, dataset5, dataset6,
+                  dataset7, dataset9)
+all_data$Gene <- factor(all_data$Gene, levels=all_data[nrow(all_data):1,"Gene"])
+
+ggplot(all_data, aes(x = HR, xmin = CI_low, xmax = CI_high, y = Gene)) +
+  geom_point(size = 2, color = "black") +
+  geom_errorbarh(height = 0.2, color = "darkgrey") +
+  xlim(c(0, 7)) + 
+  geom_vline(xintercept =1)+
+  xlab("Hazard Ratio") +
+  ylab("") +
+  theme_classic()
+
+ggsave("Figures/FN1_HRs.pdf")
+
+```
+
+```{r }
+
+ggplot(pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene=="FN1"&
+                                             !is.na(pROIs_lfq$Long_expr_filt_imp_scaled$Gene),], 
+       aes(x=factor(Stroma),y=Expr))+geom_boxplot()
+
+ggplot(pROIs_lfq$Long_expr_filt_imp_scaled[pROIs_lfq$Long_expr_filt_imp_scaled$Gene=="FN1"&
+                                             !is.na(pROIs_lfq$Long_expr_filt_imp_scaled$Gene),], 
+       aes(x=factor(Mucin),y=Expr))+geom_boxplot()
+
+```

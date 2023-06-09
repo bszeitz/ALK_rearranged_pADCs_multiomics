@@ -1,0 +1,314 @@
+---
+title: "Clean Table S1 content and save it in RData object"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+```{r include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+```
+
+What to run?
+
+```{r }
+get_broad_genesets <- F # takes ca. 1 min
+run_singscore <- F # takes ca. 2 min
+
+```
+
+
+# Save genesets in a format that can be used for overrepresentation analysis (ORA) or pre-ranked GSEA
+
+
+File requirement: 
+- "Input_files/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5_GMTs/msigdb.v7.5.symbols.gmt"
+- "Input_files/msigdb_v7.5_files_to_download_locally/msigdb_v7.5_GMTs/msigdb.v7.5.symbols.gmt"
+
+Donwloadable from https://data.broadinstitute.org/gsea-msigdb/msigdb/release/7.5.1/ (last accessed on 02 June 2023)
+
+
+```{r }
+genesets_for_ora <- qusage::read.gmt("Input_files/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5.1_GMTs/msigdb.v7.5.1.symbols.gmt")
+genesets_for_ora <- genesets_for_ora[grep("HALLMARK_|REACTOME_|KEGG_", names(genesets_for_ora))]
+
+genesets_for_gsea<- clusterProfiler::read.gmt("Input_files/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5.1_GMTs/msigdb.v7.5.1.symbols.gmt")
+genesets_for_gsea <- genesets_for_gsea[grepl("HALLMARK_|KEGG_|REACTOME_",genesets_for_gsea$term),]
+
+save(genesets_for_ora, genesets_for_gsea, file="RData/HM_KEGG_Reactome_genesets.RData")
+
+```
+
+
+
+
+# Load the content of Table S1
+
+
+```{r }
+
+pROIs_lfq <- read_gct_13("Input_files/TableS1_ROI_annotation_expression_table.xlsx", "pROI_LFQ_table")
+pROIs_ibaq <- read_gct_13("Input_files/TableS1_ROI_annotation_expression_table.xlsx", "pROI_iBAQ_table")
+tROIs_beforelog2 <- read_gct_13("Input_files/TableS1_ROI_annotation_expression_table.xlsx", "tROI_table")
+tROIs <- read_gct_13("Input_files/TableS1_ROI_annotation_expression_table.xlsx", "tROI_table_log2")
+
+pROIs_lfq$Sample_annot$TIL <- as.numeric(pROIs_lfq$Sample_annot$TIL)
+pROIs_lfq$Sample_annot$Mucin <- as.numeric(pROIs_lfq$Sample_annot$Mucin)
+pROIs_lfq$Sample_annot$Stroma <- as.numeric(pROIs_lfq$Sample_annot$Stroma)
+pROIs_lfq$Sample_annot$Immune_score_avr <- as.numeric(pROIs_lfq$Sample_annot$Immune_score_avr)
+pROIs_lfq$Sample_annot$OS_years <- as.numeric(pROIs_lfq$Sample_annot$OS_years)
+
+tROIs$Sample_annot$Immune_score <- as.numeric(tROIs$Sample_annot$Immune_score)
+tROIs$Sample_annot$OS_years <- as.numeric(tROIs$Sample_annot$OS_years)
+
+```
+
+
+# Perform filtering and imputation in pROI tables
+
+```{r }
+pROIs_lfq$Expr_filt <- filter_missingvalues(pROIs_lfq$Expr, 80)
+
+pROIs_ibaq$Expr_genenames <- pROIs_ibaq$Expr[pROIs_ibaq$Row_annot[!is.na(pROIs_ibaq$Row_annot$Gene),"Row_name"],]
+row.names(pROIs_ibaq$Expr_genenames) <- pROIs_ibaq$Row_annot[!is.na(pROIs_ibaq$Row_annot$Gene),"Gene"]
+pROIs_ibaq$Expr_genenames_filt <- filter_missingvalues(pROIs_ibaq$Expr_genenames, 80)
+
+set.seed(12345)
+pROIs_lfq$Expr_filt_imp <- impute.MinProb(pROIs_lfq$Expr_filt)
+set.seed(12345)
+pROIs_ibaq$Expr_genenames_filt_imp <- impute.MinProb(pROIs_ibaq$Expr_genenames_filt)
+
+```
+
+
+# SingScore calculation with iBAQ values and gene counts
+
+
+File requirement: "Input_files/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5.1.xml"
+
+Donwloadable from https://www.gsea-msigdb.org/gsea/downloads_archive.jsp (last accessed on 02 June 2023)
+
+
+```{r }
+
+if (get_broad_genesets){
+  gsc <- getBroadSets("Input_files/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5.1.xml")
+  save(gsc, file="RData/msigdb_v7.5.1.RData")
+}
+
+load("RData/msigdb_v7.5.1.RData") # saved as RData object for quicker import
+genesets_to_use <- gsc[grepl("HALLMARK_|REACTOME_|KEGG_",names(gsc)) ]
+
+```
+
+
+```{r }
+dgelists <- list(tROIs = DGEList(counts = tROIs$Expr, 
+                               genes = row.names(tROIs$Expr)),
+                 pROIs = DGEList(counts = pROIs_ibaq$Expr_genenames_filt_imp, 
+                                genes = row.names(pROIs_ibaq$Expr_genenames_filt_imp)))
+
+dgelists_ranked <- lapply(dgelists, rankGenes)
+```
+
+
+```{r  }
+if (run_singscore){
+  starttime <- Sys.time()
+  SingScore_res <- lapply(dgelists_ranked, function(df){
+    calculate_singScores(ranked_df = df, 
+                         geneset_list = genesets_to_use, 
+                         min_overlap = 10)
+  })
+  # 2 min runtime for the HM, KEGG, Reactome genesets for the 2 datasets
+  endtime <- Sys.time()
+  save(SingScore_res, file="RData/SingScores_KEGG_HM_Reac.RData")
+}
+load("RData/SingScores_KEGG_HM_Reac.RData")
+
+```
+
+
+
+```{r }
+SingScore_res <- lapply(SingScore_res, function(x){
+  lapply(x, function(y){as.data.frame(t(y))})
+})
+
+```
+
+
+Create tROI singScore/ gene count table where ROIs from the same pROIs are summed up
+
+
+```{r }
+
+#pROI_samples_with_tROI <- na.omit(unique(tROIs$Sample_annot$Proteomic_region))
+#matrix_to_use <- SingScore_res$tROIs$Scores
+#tROI_annot <- tROIs$Sample_annot
+#annot_col <- "Proteomic_region"
+
+sum_up_tROI_to_pROI <- function(pROI_samples_with_tROI, matrix_to_use, tROI_annot, annot_col){
+  
+  summed_tab <- as.data.frame(matrix(nrow=nrow(matrix_to_use),
+                                             ncol=length(pROI_samples_with_tROI)))
+  row.names(summed_tab) <- row.names(matrix_to_use)
+  colnames(summed_tab) <- pROI_samples_with_tROI
+  
+  
+  for (i in 1:nrow(summed_tab)){
+    for (j in 1:ncol(summed_tab)){
+      original_ROIs <- tROI_annot[tROI_annot[,annot_col] == colnames(summed_tab)[j] &
+                                            !is.na(tROI_annot[,annot_col]),"Sample"]
+      original_values <- as.numeric(matrix_to_use[row.names(summed_tab)[i],
+                                                               original_ROIs])
+      summed_tab[i,j] <- mean(original_values, na.rm=T)
+    }
+  }
+  
+  colnames(summed_tab) <- pROI_samples_with_tROI
+  return(summed_tab)
+}
+
+tROIs_sum <- tROIs
+tROIs_sum$Expr <- sum_up_tROI_to_pROI(pROI_samples_with_tROI = na.omit(unique(tROIs$Sample_annot$Proteomic_region)),
+                                      matrix_to_use = tROIs_sum$Expr,
+                                      tROI_annot = tROIs$Sample_annot,
+                                      annot_col = "Proteomic_region"
+                                      )
+tROIs_sum$Sample_annot <- pROIs_lfq$Sample_annot[colnames(tROIs_sum$Expr),]
+
+tROIs_sum$Singscores <- filter_missingvalues(sum_up_tROI_to_pROI(pROI_samples_with_tROI = na.omit(unique(tROIs$Sample_annot$Proteomic_region)),
+                                      matrix_to_use = SingScore_res$tROIs$Scores,
+                                      tROI_annot = tROIs$Sample_annot,
+                                      annot_col = "Proteomic_region"
+                                      ),1)
+
+
+tROIs$Singscores <- filter_missingvalues(SingScore_res$tROIs$Scores,1)
+pROIs_lfq$Singscores <- filter_missingvalues(SingScore_res$pROIs$Scores,1)
+
+```
+
+
+# SafeTME estimations
+
+
+```{r }
+per_observation_mean_neg <- as.matrix(tROIs_beforelog2$Expr)["Negative Probe", ] # estimate per-observation background with negative probe
+bg <- sweep(as.matrix(tROIs_beforelog2$Expr) * 0, 2, per_observation_mean_neg, "+") # define a background matrix
+
+#nuclei_count <- as.numeric(tROIs_beforelog2$Sample_annot$AOI_nuclei_count)
+#names(nuclei_count) <- tROIs_beforelog2$Sample_annot$Sample
+
+```
+
+
+Load the cell profile matrix (SafeTME)
+
+```{r }
+data("safeTME") # reached through the spatialdecon R package
+
+```
+
+Performing deconvolution with the spatialdecon function
+
+```{r }
+
+spatialDecon_res <- spatialdecon(norm = as.matrix(tROIs_beforelog2$Expr),
+                                 bg = bg,
+                                 X = safeTME,
+                                 #cell_counts = nuclei_count[colnames(tROIs_beforelog2$Expr)], 
+                                 ## including nuclei counts did not change betas
+                                 align_genes = TRUE)
+
+
+```
+
+
+```{r }
+
+tROIs$TME_estimation <- as.data.frame(spatialDecon_res$beta)
+tROIs_sum$TME_estimation <- sum_up_tROI_to_pROI(pROI_samples_with_tROI = na.omit(unique(tROIs$Sample_annot$Proteomic_region)),
+                                      matrix_to_use = tROIs$TME_estimation,
+                                      tROI_annot = tROIs$Sample_annot,
+                                      annot_col = "Proteomic_region"
+                                      )
+
+#save(TME_estimation, file="RData/TME_estimation.RData")
+
+```
+
+
+
+# Scaled and long tables
+
+
+```{r }
+tROIs$Expr_scaled <- as.data.frame(t(scale(t(tROIs$Expr))))
+
+tROIs_sum$Expr_scaled <- sum_up_tROI_to_pROI(pROI_samples_with_tROI = na.omit(unique(tROIs$Sample_annot$Proteomic_region)),
+                                      matrix_to_use = tROIs$Expr_scaled,
+                                      tROI_annot = tROIs$Sample_annot,
+                                      annot_col = "Proteomic_region"
+                                      )
+
+#pROIs_lfq$Expr_scaled <- as.data.frame(t(scale(t(pROIs_lfq$Expr))))
+#pROIs_lfq$Expr_filt_scaled <- as.data.frame(t(scale(t(pROIs_lfq$Expr_filt))))
+pROIs_lfq$Expr_filt_imp_scaled <- as.data.frame(t(scale(t(pROIs_lfq$Expr_filt_imp))))
+
+```
+
+
+
+```{r }
+
+pROIs_lfq$Long_expr_filt_imp <- create_long_table(table_to_melt = pROIs_lfq$Expr_filt_imp,
+                                             #genes = FALSE, 
+                                             row_annot <- pROIs_lfq$Row_annot,
+                                             col_annot <- pROIs_lfq$Sample_annot)
+
+pROIs_lfq$Long_expr_filt_imp_scaled <- create_long_table(table_to_melt = pROIs_lfq$Expr_filt_imp_scaled,
+                                                    #genes = FALSE, 
+                                                    row_annot <- pROIs_lfq$Row_annot,
+                                                    col_annot <- pROIs_lfq$Sample_annot)
+
+
+tROIs$Long_expr <- create_long_table(table_to_melt = tROIs$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- tROIs$Row_annot,
+                                             col_annot <- tROIs$Sample_annot)
+tROIs$Long_expr_scaled <- create_long_table(table_to_melt = tROIs$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- tROIs$Row_annot,
+                                             col_annot <- tROIs$Sample_annot)
+
+
+tROIs_sum$Long_expr <- create_long_table(table_to_melt = tROIs_sum$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- tROIs_sum$Row_annot,
+                                             col_annot <- tROIs_sum$Sample_annot)
+tROIs_sum$Long_expr_scaled <- create_long_table(table_to_melt = tROIs_sum$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- tROIs_sum$Row_annot,
+                                             col_annot <- tROIs_sum$Sample_annot)
+
+
+```
+
+
+```{r }
+save(pROIs_lfq, tROIs, tROIs_sum, file="RData/Cleaned_input_files.RData")
+```
+
+
+
+```{r }
+
+```
+
+
+
+

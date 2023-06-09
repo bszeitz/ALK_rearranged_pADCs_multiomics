@@ -1,0 +1,208 @@
+---
+title: "Consensus clustering"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+```
+
+
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+```
+
+```{r }
+pROI_clusters <- ConsensusClusterPlus(as.matrix(pROIs_lfq$Expr_filt_imp_scaled),
+                                   maxK=10,
+                                   reps=1000,
+                                   pItem=0.8,
+                                   pFeature=0.8,  
+                                   clusterAlg="pam", 
+                                   distance="pearson",
+                                   title="Figures/Clusters_pROI",
+                                   plot = "pdf",
+                                   seed=1262118388.71279)
+
+pROIs_lfq$Sample_annot[colnames(pROIs_lfq$Expr_filt_imp),"Cluster"] <- pROI_clusters[[6]][["consensusClass"]]
+
+
+```
+
+
+
+
+```{r }
+
+tROI_clusters <- ConsensusClusterPlus(as.matrix(tROIs$Expr_scaled),
+                                   maxK=10,
+                                   reps=1000,
+                                   pItem=0.8,
+                                   pFeature=0.8,  
+                                   clusterAlg="pam", 
+                                   distance="pearson",
+                                   title="Figures/Clusters_tROI",
+                                   plot = "pdf",
+                                   seed=1262118388.71279)
+
+tROIs$Sample_annot[colnames(tROIs$Expr_scaled),"Cluster"] <- tROI_clusters[[6]][["consensusClass"]]
+
+```
+
+
+
+
+```{r }
+
+cluster_comp <- merge(tROIs$Sample_annot[,c("Sample", "Proteomic_region", "Cluster")], pROIs_lfq$Sample_annot[,c("Sample", "Cluster")],
+                      by.x="Proteomic_region", by.y="Sample")
+
+ggplot(cluster_comp, aes(Cluster.x,Cluster.y))+geom_beeswarm()
+
+
+```
+
+
+
+
+```{r , fig.width=15, fig.height=5}
+
+pROIs_lfq$Sample_annot$`Mucin score` <- pROIs_lfq$Sample_annot$Mucin
+pROIs_lfq$Sample_annot$`Stroma score` <- pROIs_lfq$Sample_annot$Stroma
+pROIs_lfq$Sample_annot$`TIL (%)` <- pROIs_lfq$Sample_annot$TIL
+
+colha_pROIs <- HeatmapAnnotation(df =pROIs_lfq$Sample_annot[colnames(pROIs_lfq$Expr_filt_imp_scaled),
+                                                      c("Case", "Pathology", "TIL (%)",
+                                                        "Mucin score", "Stroma score" )],
+                                 which="col",
+                                 col=colorlist,
+                                 annotation_name_side = "left",
+                                 gp = gpar(col = "lightgrey"),
+                                 #gap = unit(c(2,2,2,2,2), 'mm'),
+                                 show_legend = TRUE,
+                                 show_annotation_name = TRUE)
+
+
+draw(Heatmap(pROIs_lfq$Expr_filt_imp_scaled, 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = F,
+             column_split = factor(pROIs_lfq$Sample_annot[colnames(pROIs_lfq$Expr_filt_imp_scaled),"Cluster"],
+                                   levels = c(1,2,3,4,5,6)),
+             cluster_row_slices = F,
+             height = unit(2, "cm"),
+             heatmap_width = unit(ncol(pROIs_lfq$Expr_filt_imp_scaled)*0.25, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_pROIs, 
+             show_column_names = F,
+             cluster_columns = T))
+
+
+tROIs$Sample_annot$`Stroma score` <- 1
+tROIs$Sample_annot$`Immune score` <- tROIs$Sample_annot$Immune_score
+
+
+tROIs$Sample_annot <- merge(tROIs$Sample_annot, 
+                      pROIs_lfq$Sample_annot[,c("Sample", "Cluster")],
+                      by.x="Proteomic_region", by.y="Sample", all.x=T)
+
+tROIs$Sample_annot$Cluster <- tROIs$Sample_annot$Cluster.x
+tROIs$Sample_annot$`pROI cluster` <- ifelse(is.na(tROIs$Sample_annot$Cluster.y), 
+                                          "unannotated", 
+                                          tROIs$Sample_annot$Cluster.y)
+row.names(tROIs$Sample_annot) <- tROIs$Sample_annot$Sample
+
+colha_tROIs <- HeatmapAnnotation(df =tROIs$Sample_annot[colnames(tROIs$Expr_scaled),
+                                                  c("Case", "Pathology", 
+                                                    "Immune score","pROI cluster", "Stroma score")],
+                                 which="col",
+                                 col=colorlist,
+                                 annotation_name_side = "left",
+                                 gp = gpar(col = "lightgrey"),
+                                 #gap = unit(c(2,2,2,2,2), 'mm'),
+                                 show_legend = TRUE,
+                                 show_annotation_name = TRUE)
+
+
+draw(Heatmap(tROIs$Expr_scaled, 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = F,
+             column_split = factor(tROIs$Sample_annot[colnames(tROIs$Expr_scaled),"Cluster"], 
+                                   levels = c(1,2,3,4,5,6)),
+             height = unit(2, "cm"),
+             heatmap_width = unit(ncol(tROIs$Expr_scaled)*0.25, "cm"),
+             cluster_column_slices = T,
+             cluster_row_slices = F,
+             show_row_dend = F,
+             show_column_names = F,
+             top_annotation = colha_tROIs, 
+             cluster_columns = T))
+
+```
+
+
+
+```{r }
+
+pdf(file="Figures/Cons_clusters_pROIs.pdf",width = 16, height = 4)
+draw(Heatmap(pROIs_lfq$Expr_filt_imp_scaled, 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = F,
+             column_split = factor(pROIs_lfq$Sample_annot[colnames(pROIs_lfq$Expr_filt_imp_scaled),"Cluster"],
+                                   levels = c(1,2,3,4,5,6)),
+             cluster_row_slices = F,
+             height = unit(2, "cm"),
+             heatmap_width = unit(ncol(pROIs_lfq$Expr_filt_imp_scaled)*0.25, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_pROIs, 
+             show_column_names = F,
+             cluster_columns = T))
+dev.off()
+
+
+
+pdf(file="Figures/Cons_clusters_tROIs.pdf",width = 16, height = 4)
+draw(Heatmap(tROIs$Expr_scaled, 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = F,
+             column_split = factor(tROIs$Sample_annot[colnames(tROIs$Expr_scaled),"Cluster"], 
+                                   levels = c(1,2,3,4,5,6)),
+             height = unit(2, "cm"),
+             heatmap_width = unit(ncol(tROIs$Expr_scaled)*0.25, "cm"),
+             cluster_column_slices = T,
+             cluster_row_slices = F,
+             show_row_dend = F,
+             show_column_names = F,
+             top_annotation = colha_tROIs, 
+             cluster_columns = T))
+dev.off()
+
+```
+
+
+```{r }
+
+```
+
+
+
+
+

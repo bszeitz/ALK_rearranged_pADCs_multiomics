@@ -1,0 +1,290 @@
+---
+title: "Clean CPTAC and TCGA data and save it in RData object"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+
+load("RData/Cleaned_input_files.RData")
+
+all_genes_in_ours <- na.omit(unique(c(pROIs_lfq$Row_annot$Gene, tROIs$Row_annot$Gene)))
+
+```
+
+
+# TCGA data
+
+
+File requirement: 
+- "Input_files/luad_tcga/data_bcr_clinical_data_sample.txt"
+- "Input_files/luad_tcga/data_bcr_clinical_data_patient.txt"
+- "Input_files/luad_tcga/data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt"
+- "Input_files/luad_tcga/data_rppa_Zscores.txt"
+
+Downloadable from https://www.cbioportal.org/study/summary?id=luad_tcga (last accessed on 02 June 2023)
+
+
+```{r}
+
+sample_raw <- read.delim("Input_files/luad_tcga/data_bcr_clinical_data_sample.txt")
+
+sample_data <- sample_raw[-c(1:4),]
+colnames(sample_data) <- sample_raw[4,]
+
+clinical_raw <- read.delim("Input_files/luad_tcga/data_bcr_clinical_data_patient.txt")
+
+clinical <- clinical_raw[-c(1:4),]
+colnames(clinical) <- clinical_raw[4,]
+
+
+clinical_short <- clinical[,c("PATIENT_ID", "OS_STATUS", 
+                              "OS_MONTHS", "ALK_TRANSLOCATION_STATUS", 
+                              "AJCC_PATHOLOGIC_TUMOR_STAGE")]
+
+clinical_short <- merge(clinical_short, sample_data[,c("PATIENT_ID", "SAMPLE_ID")],by="PATIENT_ID")
+#clinical_short[duplicated(clinical_short$PATIENT_ID),]
+clinical_short <- clinical_short[!grepl("-02",clinical_short$SAMPLE_ID),]
+row.names(clinical_short) <- clinical_short$SAMPLE_ID
+
+clinical_short$status <- ifelse(clinical_short$OS_STATUS =="0:LIVING",0,1)
+clinical_short$time <- round(as.numeric(clinical_short$OS_MONTHS) / 12,2)
+clinical_short$stage <- clinical_short$AJCC_PATHOLOGIC_TUMOR_STAGE
+clinical_short$stage <- ifelse(clinical_short$stage %in% c("Stage I","Stage IB","Stage IA"),1,clinical_short$stage)
+clinical_short$stage <- ifelse(clinical_short$stage %in% c("Stage II","Stage IIA","Stage IIB"),2,clinical_short$stage)
+clinical_short$stage <- ifelse(clinical_short$stage %in%  c("Stage IIIA","Stage IIIB"),3,clinical_short$stage)
+clinical_short$stage <- ifelse(clinical_short$stage %in%  c("Stage IV"),4,clinical_short$stage)
+clinical_short$stage <- ifelse(clinical_short$stage %in%  c("[Discrepancy]", "[Not Available]"),NA,clinical_short$stage)
+
+
+ALK_clinical_short <- clinical_short[clinical_short$ALK_TRANSLOCATION_STATUS =="YES",]
+row.names(ALK_clinical_short) <- ALK_clinical_short$SAMPLE_ID
+
+```
+
+
+
+
+
+```{r}
+
+mrna_raw <- read.delim("Input_files/luad_tcga/data_RNA_Seq_v2_mRNA_median_all_sample_Zscores.txt", check.names = FALSE)
+mrna_raw <- mrna_raw[mrna_raw$Hugo_Symbol %in% all_genes_in_ours,]
+
+mrna_all <- mrna_raw[,colnames(mrna_raw) %in% clinical_short$SAMPLE_ID]
+row.names(mrna_all) <- paste("__",paste(mrna_raw$Hugo_Symbol, seq(1,nrow(mrna_raw)),sep="__"), sep="")
+
+mrna_ALK <- mrna_raw[,colnames(mrna_raw) %in% ALK_clinical_short$SAMPLE_ID]
+row.names(mrna_ALK) <- paste("__",paste(mrna_raw$Hugo_Symbol, seq(1,nrow(mrna_raw)),sep="__"), sep="")
+
+rppa_raw <- read.delim("Input_files/luad_tcga/data_rppa_Zscores.txt", check.names = FALSE)
+genenames_rppa <- sapply(strsplit(rppa_raw$Composite.Element.REF, split="|", fixed=T),"[[",1)
+rppa_raw <- rppa_raw[genenames_rppa %in% all_genes_in_ours,]
+
+rppa_all <- rppa_raw[,colnames(rppa_raw) %in% clinical_short$SAMPLE_ID]
+row.names(rppa_all) <- rppa_raw$Composite.Element.REF
+
+rppa_ALK <- rppa_raw[,colnames(rppa_raw) %in% ALK_clinical_short$SAMPLE_ID]
+row.names(rppa_ALK) <- rppa_raw$Composite.Element.REF
+
+
+ALK_clinical_short_prot <- ALK_clinical_short[ALK_clinical_short$SAMPLE_ID %in% colnames(rppa_ALK),]
+row.names(ALK_clinical_short_prot) <- ALK_clinical_short_prot$SAMPLE_ID
+
+
+clinical_short_prot <- clinical_short[clinical_short$SAMPLE_ID %in% colnames(rppa_all),]
+row.names(clinical_short_prot) <- clinical_short_prot$SAMPLE_ID
+
+
+
+ALK_clinical_short <- ALK_clinical_short[colnames(mrna_ALK),]
+clinical_short <- clinical_short[colnames(mrna_all),]
+
+
+```
+
+
+```{r , fig.width=15, fig.height=5}
+create_sample_boxplots(rppa_all, "RPPA")
+
+```
+
+
+```{r }
+
+TCGA_RNA_full <- list(Sample_annot = clinical_short,
+                      Row_annot = data.frame(Row_name = row.names(mrna_all),
+                                             Gene = sapply(strsplit(row.names(mrna_all), split="__"),"[[",2)),
+                      Expr_scaled = mrna_all[,clinical_short$SAMPLE_ID])
+TCGA_RNA_full$Sample_annot$Sample <- TCGA_RNA_full$Sample_annot$SAMPLE_ID
+
+TCGA_RNA_ALK <- list(Sample_annot = ALK_clinical_short,
+                      Row_annot = data.frame(Row_name = row.names(mrna_ALK),
+                                             Gene = sapply(strsplit(row.names(mrna_ALK), split="__"),"[[",2)),
+                      Expr_scaled = mrna_ALK[,ALK_clinical_short$SAMPLE_ID])
+TCGA_RNA_ALK$Sample_annot$Sample <- TCGA_RNA_ALK$Sample_annot$SAMPLE_ID
+
+TCGA_RPPA_full <- list(Sample_annot = clinical_short_prot,
+                      Row_annot = data.frame(Row_name = row.names(rppa_all),
+                                             Gene = sapply(strsplit(row.names(rppa_all), split="|", fixed=T),"[[",1)),
+                      Expr = rppa_all[,clinical_short_prot$SAMPLE_ID],
+                      Expr_scaled = as.data.frame(t(scale(t(rppa_all[,clinical_short_prot$SAMPLE_ID])))))
+TCGA_RPPA_full$Sample_annot$Sample <- TCGA_RPPA_full$Sample_annot$SAMPLE_ID
+
+
+TCGA_RPPA_ALK <- list(Sample_annot = ALK_clinical_short_prot,
+                      Row_annot = data.frame(Row_name = row.names(rppa_ALK),
+                                             Gene = sapply(strsplit(row.names(rppa_ALK), split="|", fixed=T),"[[",1)),
+                      Expr = rppa_ALK[,ALK_clinical_short_prot$SAMPLE_ID],
+                      Expr_scaled = as.data.frame(t(scale(t(rppa_ALK[,ALK_clinical_short_prot$SAMPLE_ID])))))
+TCGA_RPPA_ALK$Sample_annot$Sample <- TCGA_RPPA_ALK$Sample_annot$SAMPLE_ID
+
+
+
+```
+
+
+# CPTAC data
+
+
+File requirement: 
+- "Input_files/luad_cptac/Gilette2020_LUAD_CPTAC_TableS2.xlsx"
+- "Input_files/luad_cptac/Gilette2020_LUAD_CPTAC_TableS3.xlsx"
+- "Input_files/luad_cptac/Soltis2022_LUAD_APOLLO_TableS2.xlsx"
+
+Downloadable from https://doi.org/10.1016/j.cell.2020.06.013 , Table S2&S3 (last accessed on 03 June 2023) &
+from https://doi.org/10.1016/j.xcrm.2022.100819 , Table S2 (last accessed on 03 June 2023)
+
+
+ 
+```{r}
+
+CPTAC_prot_full <- read_gct_13("Input_files/luad_cptac/Gilette2020_LUAD_CPTAC_TableS3.xlsx", 2)
+CPTAC_prot_full$Sample_annot$Stage <- as.numeric(gsub("([0-9]+).*$", "\\1", CPTAC_prot_full$Sample_annot$Stage))
+CPTAC_prot_full$Row_annot <- CPTAC_prot_full$Row_annot[CPTAC_prot_full$Row_annot$geneSymbol %in% all_genes_in_ours,]
+CPTAC_prot_full$Expr <- CPTAC_prot_full$Expr[CPTAC_prot_full$Row_annot$Row_name,]
+
+CPTAC_RNA_full <- read_gct_13("Input_files/luad_cptac/Gilette2020_LUAD_CPTAC_TableS2.xlsx", 6)
+CPTAC_RNA_full$Row_annot <- CPTAC_RNA_full$Row_annot[CPTAC_RNA_full$Row_annot$geneSymbol %in% all_genes_in_ours,]
+CPTAC_RNA_full$Expr <- CPTAC_RNA_full$Expr[CPTAC_RNA_full$Row_annot$Row_name,]
+
+```
+
+
+
+```{r , fig.width=15, fig.height=5}
+
+create_sample_boxplots(CPTAC_prot_full$Expr, "CPTAC proteomics")
+create_sample_boxplots(CPTAC_RNA_full$Expr, "CPTAC transcriptomics")
+
+```
+
+
+```{r }
+CPTAC_prot_full$Expr_scaled <- as.data.frame(t(scale(t(CPTAC_prot_full$Expr))))
+CPTAC_RNA_full$Expr_scaled <- as.data.frame(t(scale(t(CPTAC_RNA_full$Expr))))
+```
+
+```{r }
+
+CPTAC_OS_data <- read.xlsx("Input_files/luad_cptac/Soltis2022_LUAD_APOLLO_TableS2.xlsx", sheet=2)
+CPTAC_OS_data$time <- CPTAC_OS_data$osTime * 0.0027379070069885
+CPTAC_OS_data$status <- CPTAC_OS_data$osStat
+CPTAC_OS_data$Sample_ID <- gsub("-",".",CPTAC_OS_data$Row.names)
+
+nat_ids <- paste(CPTAC_OS_data$Sample_ID, "N", sep=".")
+
+CPTAC_OS_data <- rbind(CPTAC_OS_data, CPTAC_OS_data)
+CPTAC_OS_data[1:length(nat_ids),"Sample_ID"] <- nat_ids
+
+CPTAC_prot_full$Sample_annot <- merge(CPTAC_prot_full$Sample_annot, 
+                                      CPTAC_OS_data[,c("Sample_ID", "time", "status")], all.x=T,
+                     by.x="Sample.ID", by.y="Sample_ID")
+row.names(CPTAC_prot_full$Sample_annot) <- CPTAC_prot_full$Sample_annot$Sample.ID
+CPTAC_RNA_full$Sample_annot <- merge(CPTAC_RNA_full$Sample_annot, 
+                                     CPTAC_OS_data[,c("Sample_ID", "time", "status")], all.x=T,
+                     by.x="Sample.ID", by.y="Sample_ID")
+row.names(CPTAC_RNA_full$Sample_annot) <- CPTAC_RNA_full$Sample_annot$Sample.ID
+CPTAC_prot_full$Sample_annot <- CPTAC_prot_full$Sample_annot[colnames(CPTAC_prot_full$Expr),]
+CPTAC_RNA_full$Sample_annot <- CPTAC_RNA_full$Sample_annot[colnames(CPTAC_RNA_full$Expr),]
+
+```
+
+
+```{r}
+
+CPTAC_prot_full$Long_expr <- create_long_table(table_to_melt = CPTAC_prot_full$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- CPTAC_prot_full$Row_annot,
+                                             col_annot <- CPTAC_prot_full$Sample_annot)
+
+CPTAC_RNA_full$Long_expr <- create_long_table(table_to_melt = CPTAC_RNA_full$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- CPTAC_RNA_full$Row_annot,
+                                             col_annot <- CPTAC_RNA_full$Sample_annot)
+
+
+CPTAC_prot_full$Long_expr_scaled <- create_long_table(table_to_melt = CPTAC_prot_full$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- CPTAC_prot_full$Row_annot,
+                                             col_annot <- CPTAC_prot_full$Sample_annot)
+
+CPTAC_RNA_full$Long_expr_scaled <- create_long_table(table_to_melt = CPTAC_RNA_full$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- CPTAC_RNA_full$Row_annot,
+                                             col_annot <- CPTAC_RNA_full$Sample_annot)
+
+```
+
+
+```{r }
+
+TCGA_RNA_full$Long_expr_scaled <- create_long_table(table_to_melt = TCGA_RNA_full$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RNA_full$Row_annot,
+                                             col_annot <- TCGA_RNA_full$Sample_annot)
+
+TCGA_RNA_ALK$Long_expr_scaled <- create_long_table(table_to_melt = TCGA_RNA_ALK$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RNA_ALK$Row_annot,
+                                             col_annot <- TCGA_RNA_ALK$Sample_annot)
+
+
+TCGA_RPPA_full$Long_expr <- create_long_table(table_to_melt = TCGA_RPPA_full$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RPPA_full$Row_annot,
+                                             col_annot <- TCGA_RPPA_full$Sample_annot)
+TCGA_RPPA_full$Long_expr_scaled <- create_long_table(table_to_melt = TCGA_RPPA_full$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RPPA_full$Row_annot,
+                                             col_annot <- TCGA_RPPA_full$Sample_annot)
+
+TCGA_RPPA_ALK$Long_expr <- create_long_table(table_to_melt = TCGA_RPPA_ALK$Expr,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RPPA_ALK$Row_annot,
+                                             col_annot <- TCGA_RPPA_ALK$Sample_annot)
+
+TCGA_RPPA_ALK$Long_expr_scaled <- create_long_table(table_to_melt = TCGA_RPPA_ALK$Expr_scaled,
+                                             #genes = TRUE, 
+                                             row_annot <- TCGA_RPPA_ALK$Row_annot,
+                                             col_annot <- TCGA_RPPA_ALK$Sample_annot)
+
+
+```
+
+
+
+
+```{r }
+save(TCGA_RNA_full, TCGA_RNA_ALK, TCGA_RPPA_full, TCGA_RPPA_ALK,
+     CPTAC_prot_full, CPTAC_RNA_full,
+     file="RData/TCGA_CPTAC.RData")
+
+```
+
+
+

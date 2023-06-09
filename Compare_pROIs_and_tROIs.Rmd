@@ -1,0 +1,270 @@
+---
+title: "Compare pROI and tROI data"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+```
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+loaded <- load("RData/HM_KEGG_Reactome_genesets.RData")
+loaded
+
+```
+
+
+# Overlap btw proteomics and transcriptomics
+
+At gene level:
+
+```{r , fig.width=2.5, fig.height=2.5}
+
+Feature_level <- list(proteins = unique(pROIs_lfq$Row_annot[row.names(pROIs_lfq$Expr_filt_imp),"Gene"]),
+                      genes = tROIs$Row_annot$Gene)
+
+for (i in 1:length(Feature_level[[1]])){
+  if (is.na(Feature_level[[1]][i])){
+    Feature_level[[1]][i] <- paste("NA", i,sep="")
+  }
+}
+
+
+ggvenn(
+  Feature_level, 
+    fill_color = c("#e68426ff", "#efd660ff"), 
+  stroke_size = 1, set_name_size = 3,show_percentage = F,stroke_color = "white"
+  )
+
+
+
+Pathway_level <- list(pROIs = unique(row.names(pROIs_lfq$Singscores)),
+                      tROIs = unique(row.names(tROIs$Singscores)))
+
+ggvenn(
+  Pathway_level, 
+    fill_color = c("#e68426ff", "#efd660ff"), 
+  stroke_size = 1, set_name_size = 3,show_percentage = F,stroke_color = "white"
+  )
+
+```
+
+
+# Correlation between proteins and genes
+
+
+```{r }
+
+common_proteins <- pROIs_lfq$Row_annot[pROIs_lfq$Row_annot$Gene %in% intersect(Feature_level$proteins,
+                                                                               Feature_level$genes),
+                                       "Row_name"]
+common_genes <- pROIs_lfq$Row_annot[common_proteins,"Gene"]
+
+common_samples <- colnames(tROIs_sum$Expr)
+
+pROI_common <- pROIs_lfq$Expr_filt_imp_scaled[common_proteins,common_samples]
+row.names(pROI_common) <- common_genes
+tROI_common <- tROIs_sum$Expr_scaled[common_genes,]
+
+all(row.names(pROI_common) == row.names(tROI_common))
+```
+
+Perform Pearson correlation analysis:
+
+```{r }
+Corr_genes <- data.frame(Gene = row.names(pROI_common),
+                         Coef = NA,
+                         Pvalue = NA,
+                         Lwr_CI = NA,
+                         Upr_CI = NA,
+                         t = NA,
+                         df = NA)
+for (i in 1:nrow(Corr_genes)){
+  corres <- cor.test(as.numeric(pROI_common[i,]), as.numeric(tROI_common[i,]), 
+                     use="pairwise.complete.obs", 
+                     method = "pearson")
+  Corr_genes[i,2:7] <- paste(c(corres$estimate, corres$p.value, 
+                               corres$conf.int[1], corres$conf.int[2], 
+                               corres$statistic, corres$parameter))
+}
+
+Corr_genes[2:7] <- sapply(Corr_genes[2:7], as.numeric)
+Corr_genes$Adj_Pvalue <- p.adjust(Corr_genes$Pvalue, "BH")
+
+
+Corr_genes$Significant <- "NS"
+Corr_genes$Significant <- ifelse(Corr_genes$Adj_Pvalue < 0.05 & Corr_genes$Coef > 0, "UP", Corr_genes$Significant)
+Corr_genes$Significant <- ifelse(Corr_genes$Adj_Pvalue < 0.05 & Corr_genes$Coef < 0, "DN", Corr_genes$Significant)
+
+save(Corr_genes, file="RData/Correlation_res_genes.RData")
+
+
+```
+
+
+```{r , fig.width=1.5, fig.height=1.5}
+
+ggplot(Corr_genes, aes(Coef, fill = Significant)) +
+  geom_histogram(bins = 40) +
+  gghighlight()+ scale_fill_manual(values=c('dodgerblue3','darkgrey', 'firebrick3'))+
+  xlab("Pearson correlation coefficient")+ ylab("Gene count")+theme_bw()+ 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+xlim(c(-1,1))#+ylim(c(0,20))
+
+ggsave("Figures/Correlation_gene.pdf")
+
+
+```
+
+```{r }
+summary(factor(Corr_genes$Significant))
+mean(Corr_genes$Coef, na.rm=T)
+sd(Corr_genes$Coef, na.rm=T)
+
+pos_corr_signif <- Corr_genes[Corr_genes$Adj_Pvalue < 0.05 & Corr_genes$Coef > 0,]
+pos_corr_signif <- pos_corr_signif[order(pos_corr_signif$Adj_Pvalue),]
+
+neg_corr_signif <- Corr_genes[Corr_genes$Adj_Pvalue < 0.05 & Corr_genes$Coef < 0,]
+
+```
+
+
+Scatter plots for the top 5 positively correlating and for the 1 negatively correlating gene:
+
+```{r , fig.width=3, fig.height=1.5}
+top_corr <- c(pos_corr_signif[1:5,"Gene"], neg_corr_signif$Gene)
+
+#genename <- "LTF"
+sapply(top_corr, function(genename){
+  Gene_expressions <- data.frame(pROI = as.numeric(pROI_common[genename,]),
+                                 tROI = as.numeric(tROI_common[genename,]),
+                                 Label = colnames(pROI_common))
+  g <- ggplot(Gene_expressions, aes(x=pROI, y=tROI)) +
+    geom_point()+
+    #geom_text_repel()+
+    theme_bw()+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+    geom_smooth(method=lm) + ggtitle(genename)+xlab("pROI Z-scored LFQ value")+ylab("tROI Z-scored count")
+  print(g)
+  ggsave(paste0("Figures/Top_corr_", genename,".pdf"))
+})
+
+
+```
+
+
+Perform overrepresentation analysis for the positively correlating genes, and export the results:
+
+
+```{r }
+
+pos_corr_ORA <- perform_fora(genesets_for_ora, 
+                             pos_corr_signif$Gene, 
+                             common_genes,
+                             minSize = 1)
+
+pos_corr_ORA <- pos_corr_ORA[pos_corr_ORA$overlap > 0,]
+
+
+```
+
+
+
+# Correlation between singScores
+
+
+```{r }
+
+common_scores <- intersect(Pathway_level$pROIs,Pathway_level$tROIs)
+common_samples <- colnames(tROIs_sum$Expr)
+
+pROI_common <- pROIs_lfq$Singscores[common_scores,common_samples]
+tROI_common <- tROIs_sum$Singscores[common_scores,]
+
+all(row.names(pROI_common) == row.names(tROI_common))
+```
+
+Perform Pearson correlation analysis:
+
+```{r }
+Corr_singscores <- data.frame(Gene = row.names(pROI_common),
+                         Coef = NA,
+                         Pvalue = NA,
+                         Lwr_CI = NA,
+                         Upr_CI = NA,
+                         t = NA,
+                         df = NA)
+for (i in 1:nrow(Corr_singscores)){
+  corres <- cor.test(as.numeric(pROI_common[i,]), as.numeric(tROI_common[i,]), 
+                     use="pairwise.complete.obs", 
+                     method = "pearson")
+  Corr_singscores[i,2:7] <- paste(c(corres$estimate, corres$p.value, 
+                               corres$conf.int[1], corres$conf.int[2], 
+                               corres$statistic, corres$parameter))
+}
+
+Corr_singscores[2:7] <- sapply(Corr_singscores[2:7], as.numeric)
+Corr_singscores$Adj_Pvalue <- p.adjust(Corr_singscores$Pvalue, "BH")
+
+
+Corr_singscores$Significant <- "NS"
+Corr_singscores$Significant <- ifelse(Corr_singscores$Adj_Pvalue < 0.05 & Corr_singscores$Coef > 0, "UP", Corr_singscores$Significant)
+Corr_singscores$Significant <- ifelse(Corr_singscores$Adj_Pvalue < 0.05 & Corr_singscores$Coef < 0, "DN", Corr_singscores$Significant)
+
+Corr_singscores$Significant <- factor(Corr_singscores$Significant, levels = c("DN","UP","NS"))
+
+save(Corr_singscores, file="RData/Correlation_res_singscores.RData")
+
+
+median(Corr_singscores$Coef, na.rm = T)
+mean(Corr_singscores$Coef, na.rm = T)
+sd(Corr_singscores$Coef, na.rm = T)
+
+```
+
+
+```{r , fig.width=1.5, fig.height=1.5}
+
+
+ggplot(Corr_singscores, aes(Coef, fill = Significant)) +
+  geom_histogram(bins = 40) +
+  gghighlight()+ scale_fill_manual(values=c('dodgerblue3','firebrick3', 'darkgrey'))+
+  xlab("Pearson correlation coefficient")+ ylab("Gene set count")+theme_bw()+ 
+  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+xlim(c(-1,1))#+ylim(c(0,20))
+
+ggsave("Figures/Correlation_singscores.pdf")
+
+```
+
+```{r Table S3}
+
+wb <- createWorkbook(
+    title = NULL,
+  )
+  sheetnames <- c("Gene_level_corr", "ORA_for_pos_corr_genes", "Singscore_level_corr")
+  sheets <- list(Corr_genes[order(Corr_genes$Pvalue),], 
+                 pos_corr_ORA[order(pos_corr_ORA$pval),], 
+                 Corr_singscores[order(Corr_singscores$Pvalue),])
+  
+  for (j in 1:length(sheets)) {
+    addWorksheet(wb, sheetnames[j])
+    writeData(
+      wb = wb,
+      sheet = sheetnames[j],
+      x = sheets[[j]])
+  }
+  saveWorkbook(wb, "Suppl_tables/TableS3_pROI_tROI_correlation.xlsx", overwrite = TRUE) 
+
+
+```
+
+

@@ -1,0 +1,624 @@
+---
+title: "Intratumoral homogeneity and heterogeneity"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+```
+
+
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+loaded <- load("RData/HM_KEGG_Reactome_genesets.RData")
+loaded
+
+normal_pROIs <- pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Type=="NAT","Sample"]
+normal_tROIs <- tROIs$Sample_annot[tROIs$Sample_annot$Type=="NAT","Sample"]
+
+tumor_pROIs <- pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Type=="tumor","Sample"]
+tumor_tROIs <- tROIs$Sample_annot[tROIs$Sample_annot$Type=="tumor","Sample"]
+
+```
+
+
+```{r }
+
+Expr_pROI_per_patient <- lapply(unique(pROIs_lfq$Sample_annot$Case), function(x){
+  pROIs_lfq$Expr_filt_imp[,grepl(x, colnames(pROIs_lfq$Expr_filt_imp))&
+                    !colnames(pROIs_lfq$Expr_filt_imp) %in% normal_pROIs]
+})
+names(Expr_pROI_per_patient) <- unique(pROIs_lfq$Sample_annot$Case)
+
+
+Expr_tROI_per_patient <- lapply(unique(tROIs$Sample_annot$Case), function(x){
+  tROIs$Expr[,grepl(x, colnames(tROIs$Expr))&
+                    !colnames(tROIs$Expr) %in% normal_tROIs]
+})
+names(Expr_tROI_per_patient) <- unique(tROIs$Sample_annot$Case)
+
+
+CV_proteins <- lapply(Expr_pROI_per_patient, function(y){
+  if(is.vector(y)){
+    return(NA)
+  }
+  cvs <- apply(y, 1, function(x){sd(x, na.rm = T)/mean(x, na.rm=T)})
+  print(quantile(cvs))
+  print(mean(cvs))
+  return(cvs[order(cvs, decreasing = T)])
+})
+names(CV_proteins) <- unique(pROIs_lfq$Sample_annot$Case)
+
+CV_genes <- lapply(Expr_tROI_per_patient, function(y){
+  cvs <- apply(y, 1, function(x){sd(x, na.rm = T)/mean(x, na.rm=T)})
+   print(quantile(cvs))
+   print(mean(cvs))
+   return(cvs[order(cvs, decreasing = T)])
+ })
+names(CV_genes) <- unique(tROIs$Sample_annot$Case)
+
+
+```
+
+
+# ORA
+
+```{r }
+#quantile(unlist(CV_proteins), na.rm=T)
+#quantile(unlist(CV_genes), na.rm=T)
+
+most_var_proteins <- lapply(CV_proteins, function(x){ x[x > quantile(x, na.rm=T, probs = c(0,0.8,1))[2]]})
+most_var_genes <- lapply(CV_genes, function(x){ x[x > quantile(x, na.rm=T, probs = c(0,0.8,1))[2]]})
+
+least_var_proteins <- lapply(CV_proteins, function(x){ x[x < quantile(x, na.rm=T, probs = c(0,0.2,1))[2]]})
+least_var_genes <- lapply(CV_genes, function(x){ x[x < quantile(x, na.rm=T, probs = c(0,0.2,1))[2]]})
+
+```
+
+
+```{r }
+
+prot_bg <- unique(pROIs_lfq$Row_annot$Gene)
+prot_bg <- prot_bg[prot_bg!=""]
+rna_bg <- unique(tROIs$Row_annot$Gene)
+
+```
+
+
+# Commonly stable genes and proteins
+
+
+```{r }
+
+not_var_prots_df <- data.frame(Protein = unique(unlist(lapply(least_var_proteins, names))),
+                                Nr_occurrence = NA)
+for (i in 1:nrow(not_var_prots_df)){
+  not_var_prots_df$Nr_occurrence[i] <- sum(unlist(lapply(least_var_proteins, names)) == not_var_prots_df$Protein[i])
+}
+not_var_prots_df <- merge(not_var_prots_df, 
+                      pROIs_lfq$Row_annot[,c("Row_name", "Gene")], 
+                      by.x="Protein", by.y="Row_name")
+
+
+length(not_var_prots_df[not_var_prots_df$Nr_occurrence > 3,"Gene"])
+not_var_prots_df_ORA <- perform_fora(genesets_for_ora, 
+                                        not_var_prots_df[not_var_prots_df$Nr_occurrence > 3,"Gene"], 
+                                 prot_bg, minSize = 1)
+
+
+not_var_genes_df <- data.frame(Gene = unique(unlist(lapply(least_var_genes, names))),
+                             Nr_occurrence = NA)
+for (i in 1:nrow(not_var_genes_df)){
+  not_var_genes_df$Nr_occurrence[i] <- sum(unlist(lapply(least_var_genes, names)) == not_var_genes_df$Gene[i])
+}
+
+
+length(not_var_genes_df[not_var_genes_df$Nr_occurrence > 3,"Gene"])
+not_var_genes_df_ORA <- perform_fora(genesets_for_ora, 
+                                 not_var_genes_df[not_var_genes_df$Nr_occurrence > 3,"Gene"], 
+                                 rna_bg, minSize = 1)
+
+
+common_not_var_p_and_t <- intersect(not_var_prots_df[not_var_prots_df$Nr_occurrence > 3,"Gene"],
+                                   not_var_genes_df[not_var_genes_df$Nr_occurrence > 3,"Gene"])
+common_not_var_p_and_t
+
+
+not_var_prots_df_selected_proteinname <- not_var_prots_df[not_var_prots_df$Nr_occurrence > 3,"Protein"]
+not_var_prots_df_selected_genename <- not_var_prots_df[not_var_prots_df$Nr_occurrence > 3,"Gene"]
+not_var_genes_df_selected <- not_var_genes_df[not_var_genes_df$Nr_occurrence > 3,"Gene"]
+
+```
+
+
+# Commonly variable genes and proteins
+
+
+```{r }
+
+var_prots_df <- data.frame(Protein = unique(unlist(lapply(most_var_proteins, names))),
+                                Nr_occurrence = NA)
+for (i in 1:nrow(var_prots_df)){
+  var_prots_df$Nr_occurrence[i] <- sum(unlist(lapply(most_var_proteins, names)) == var_prots_df$Protein[i])
+}
+var_prots_df <- merge(var_prots_df, 
+                      pROIs_lfq$Row_annot[,c("Row_name", "Gene")], 
+                      by.x="Protein", by.y="Row_name")
+
+
+length(var_prots_df[var_prots_df$Nr_occurrence > 3,"Gene"])
+var_prots_df_ORA <- perform_fora(genesets_for_ora, 
+                                        var_prots_df[var_prots_df$Nr_occurrence > 3,"Gene"], 
+                                 prot_bg, minSize = 1)
+
+
+var_genes_df <- data.frame(Gene = unique(unlist(lapply(most_var_genes, names))),
+                             Nr_occurrence = NA)
+for (i in 1:nrow(var_genes_df)){
+  var_genes_df$Nr_occurrence[i] <- sum(unlist(lapply(most_var_genes, names)) == var_genes_df$Gene[i])
+}
+
+
+length(var_genes_df[var_genes_df$Nr_occurrence > 3,"Gene"])
+var_genes_df_ORA <- perform_fora(genesets_for_ora, 
+                                 var_genes_df[var_genes_df$Nr_occurrence > 3,"Gene"], 
+                                 rna_bg, minSize = 1)
+
+
+common_var_p_and_t <- intersect(var_prots_df[var_prots_df$Nr_occurrence > 3,"Gene"],
+                                   var_genes_df[var_genes_df$Nr_occurrence > 3,"Gene"])
+common_var_p_and_t
+
+
+var_prots_df_selected_proteinname <- var_prots_df[var_prots_df$Nr_occurrence > 3,"Protein"]
+var_prots_df_selected_genename <- var_prots_df[var_prots_df$Nr_occurrence > 3,"Gene"]
+var_genes_df_selected <- var_genes_df[var_genes_df$Nr_occurrence > 3,"Gene"]
+
+```
+
+
+
+
+
+
+```{r Table S5}
+
+var_prots_df_export <- var_prots_df[,c("Protein", "Gene", "Nr_occurrence")]
+colnames(var_prots_df_export)[3] <- "Among_top_variable"
+
+var_genes_df_export <- var_genes_df[,c("Gene", "Nr_occurrence")]
+colnames(var_genes_df_export)[2] <- "Among_top_variable"
+
+
+not_var_prots_df_export <- not_var_prots_df[,c("Protein", "Gene", "Nr_occurrence")]
+colnames(not_var_prots_df_export)[3] <- "Among_top_stable"
+
+not_var_genes_df_export <- not_var_genes_df[,c("Gene", "Nr_occurrence")]
+colnames(not_var_genes_df_export)[2] <- "Among_top_stable"
+
+
+wb <- createWorkbook(
+    title = NULL,
+  )
+  sheetnames <- c("pROIs_stable_proteins", "pROIs_variable_proteins", 
+                  "pROIs_stable_proteins_ORA", "pROIs_variable_proteins_ORA",
+                  "tROIs_stable_genes", "tROIs_variable_genes", 
+                  "tROIs_stable_genes_ORA", "tROIs_variable_genes_ORA")
+  sheets <- list(not_var_prots_df_export, var_prots_df_export, 
+                 not_var_prots_df_ORA, var_prots_df_ORA, 
+                 not_var_genes_df_export, var_genes_df_export, 
+                 not_var_genes_df_ORA, var_genes_df_ORA)
+  
+  for (j in 1:length(sheets)) {
+    addWorksheet(wb, sheetnames[j])
+    writeData(
+      wb = wb,
+      sheet = sheetnames[j],
+      x = sheets[[j]])
+  }
+  saveWorkbook(wb, "Suppl_tables/TableS5_Variable_proteins_genes.xlsx", overwrite = TRUE) 
+
+
+```
+
+
+# Commmonly mentioned pathways
+
+
+```{r }
+
+not_variable_pathway_common <- intersect(not_var_prots_df_ORA[not_var_prots_df_ORA$padj < 0.25,"pathway"],
+                                         not_var_genes_df_ORA[not_var_genes_df_ORA$padj < 0.25,"pathway"])
+variable_pathway_common <- intersect(var_prots_df_ORA[var_prots_df_ORA$padj < 0.25,"pathway"],
+                                     var_genes_df_ORA[var_genes_df_ORA$padj < 0.25,"pathway"])
+
+```
+
+
+```{r }
+# Not variable
+not_var_prots_df_ORA_common <- not_var_prots_df_ORA[not_var_prots_df_ORA$pathway %in% not_variable_pathway_common,]
+colnames(not_var_prots_df_ORA_common)[2:ncol(not_var_prots_df_ORA_common)] <- paste(colnames(not_var_prots_df_ORA_common)[2:ncol(not_var_prots_df_ORA_common)], "pROIs", sep="_")
+not_var_genes_df_ORA_common <- not_var_genes_df_ORA[not_var_genes_df_ORA$pathway %in% not_variable_pathway_common,]
+colnames(not_var_genes_df_ORA_common)[2:ncol(not_var_genes_df_ORA_common)] <- paste(colnames(not_var_genes_df_ORA_common)[2:ncol(not_var_genes_df_ORA_common)], "tROIs", sep="_")
+not_var_paths_summary <- merge(not_var_prots_df_ORA_common, not_var_genes_df_ORA_common,
+                                             by="pathway")
+not_var_paths_summary$common_genes <- sapply(seq(1,nrow(not_var_paths_summary)),
+                                                           function(x){
+                                                             proi_genes <- strsplit(not_var_paths_summary[x,"genes_pROIs"], split="/", fixed=T)[[1]]
+                                                             troi_genes <- strsplit(not_var_paths_summary[x,"genes_tROIs"], split="/", fixed=T)[[1]]
+                                                             return(paste(intersect(proi_genes, troi_genes), 
+                                                                          collapse = "/"))
+                                                           })
+not_var_paths_summary$type <- "ORA for stably expressed proteins/genes"
+
+# Variable
+var_prots_df_ORA_common <- var_prots_df_ORA[var_prots_df_ORA$pathway %in% variable_pathway_common,]
+colnames(var_prots_df_ORA_common)[2:ncol(var_prots_df_ORA_common)] <- paste(colnames(var_prots_df_ORA_common)[2:ncol(var_prots_df_ORA_common)], "pROIs", sep="_")
+var_genes_df_ORA_common <- var_genes_df_ORA[var_genes_df_ORA$pathway %in% variable_pathway_common,]
+colnames(var_genes_df_ORA_common)[2:ncol(var_genes_df_ORA_common)] <- paste(colnames(var_genes_df_ORA_common)[2:ncol(var_genes_df_ORA_common)], "tROIs", sep="_")
+var_paths_summary <- merge(var_prots_df_ORA_common, var_genes_df_ORA_common,
+                                             by="pathway")
+var_paths_summary$common_genes <- sapply(seq(1,nrow(var_paths_summary)),
+                                                           function(x){
+                                                             proi_genes <- strsplit(var_paths_summary[x,"genes_pROIs"], split="/", fixed=T)[[1]]
+                                                             troi_genes <- strsplit(var_paths_summary[x,"genes_tROIs"], split="/", fixed=T)[[1]]
+                                                             return(paste(intersect(proi_genes, troi_genes), 
+                                                                          collapse = "/"))
+                                                           })
+var_paths_summary$type <- "ORA for variably expressed proteins/genes"
+
+
+paths_summary <- rbind(not_var_paths_summary, var_paths_summary)
+
+paths_summary$common_p <- apply(paths_summary[,c("pval_pROIs", "pval_tROIs")],1, mean)
+
+
+paths_summary$label <- c("PI3K-AKT-mTOR signaling",
+                         "Oncogenic MAPK signaling",
+                         "Signaling by moderate kinase\nactivity BRAF mutants",
+                         "Angiogenesis",
+                         "EMT",
+                         "Complement and coagulation cascades",
+                         "ECM-receptor interaction",
+                         "Degradation of the ECM",
+                         "Diseases of glycosylation",
+                         "ECM proteoglycans",
+                         "ECM organization",
+                         "Integrin cell surface-interactions",
+                         "MET activates PTK2 signaling",
+                         "MET promotes cell motility",
+                         "Non-integrin membrane-ECM interactions",
+                         "Regulation of IGF transport and\nuptake by IGF-binding proteins",
+                         "Response to elevated platelet cytosolic CA2+",
+                         "Signaling by MET")
+
+row.names(paths_summary) <- paths_summary$pathway
+
+  
+```
+
+
+```{r }
+
+save(var_prots_df, var_genes_df, paths_summary, file="RData/variable_proteins_and_genes.RData")
+
+```
+
+
+
+```{r , fig.width=4, fig.height=3.5}
+paths_summary <- paths_summary[order(paths_summary$common_p),]
+
+paths_summary <- rbind(paths_summary[paths_summary$type =="ORA for stably expressed proteins/genes",],
+                       paths_summary[paths_summary$type !="ORA for stably expressed proteins/genes",])
+paths_summary$order <- seq(nrow(paths_summary),1)
+
+ggplot(paths_summary, aes(x = factor(label, levels=paths_summary$label[paths_summary$order]))) +
+  geom_bar(aes(y = -size_pROIs), stat = "identity", position = position_dodge(width = 0.9)) + 
+  geom_bar(aes(y = size_tROIs), stat = "identity", position = position_dodge(width = 0.9)) +
+  scale_y_continuous(labels = abs, expand = expansion(mult = c(0, 0.05))) +
+  labs(x = "", y = "Number of Genes") +
+  #color_scale_A +
+  #color_scale_B +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        plot.margin = unit(c(1, 1, 0.5, 1), "cm")) +
+  guides(fill = guide_colorbar(barwidth = 10, barheight = 0.5, title.position = "top",
+                               title.hjust = 0.5, label.position = "bottom", nbin = 20, direction = "horizontal"))+
+  geom_hline(yintercept=0)+ coord_flip()
+
+ggsave("Figures/Common_stable_variable_pathways.pdf")
+
+```
+
+
+# Heatmap with variable proteins and genes
+
+
+```{r , fig.width=20, fig.height=8}
+
+pROIs_lfq$Sample_annot$`Mucin score` <- pROIs_lfq$Sample_annot$Mucin
+pROIs_lfq$Sample_annot$`Stroma score` <- pROIs_lfq$Sample_annot$Stroma
+pROIs_lfq$Sample_annot$`TIL (%)` <- pROIs_lfq$Sample_annot$TIL
+
+colha_pROIs <- HeatmapAnnotation(df =pROIs_lfq$Sample_annot[colnames(pROIs_lfq$Expr_filt_imp_scaled),
+                                                      c("Case", "Pathology", "TIL (%)",
+                                                        "Mucin score", "Stroma score" )],
+                                 which="col",
+                                 col=colorlist,
+                                 annotation_name_side = "left",
+                                 gp = gpar(col = "lightgrey"),
+                                 #gap = unit(c(2,2,2,2,2), 'mm'),
+                                 show_legend = TRUE,
+                                 show_annotation_name = TRUE)
+
+
+draw(Heatmap(pROIs_lfq$Expr_filt_imp_scaled[var_prots_df[var_prots_df$Nr_occurrence ==6,"Protein"],], 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = T,
+             cluster_row_slices = F,
+             row_labels = var_prots_df[var_prots_df$Nr_occurrence ==6,"Gene"],
+             heatmap_width = unit(ncol(pROIs_lfq$Expr_filt_imp_scaled)*0.5, "cm"),
+             height = unit(length(var_prots_df[var_prots_df$Nr_occurrence ==6,"Protein"])*0.5, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_pROIs, 
+             show_column_names = T,
+             cluster_columns = T))
+
+
+tROIs$Sample_annot$`Stroma score` <- 1
+tROIs$Sample_annot$`Mucin score` <- 1
+tROIs$Sample_annot$`Immune score` <- tROIs$Sample_annot$Immune_score
+
+colha_tROIs <- HeatmapAnnotation(df =tROIs$Sample_annot[colnames(tROIs$Expr_scaled),
+                                                  c("Case", "Pathology", 
+                                                    "Immune score","Mucin score", "Stroma score")],
+                                 which="col",
+                                 col=colorlist,
+                                 annotation_name_side = "left",
+                                 gp = gpar(col = "lightgrey"),
+                                 #gap = unit(c(2,2,2,2,2), 'mm'),
+                                 show_legend = TRUE,
+                                 show_annotation_name = TRUE)
+
+draw(Heatmap(tROIs$Expr_scaled[var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"],], 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = T,
+             cluster_row_slices = F,
+             row_labels = var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"],
+             heatmap_width = unit(ncol(tROIs$Expr_scaled)*0.5, "cm"),
+             height = unit(length(var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"])*0.5, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_tROIs, 
+             show_column_names = T,
+             cluster_columns = T))
+
+
+```
+
+
+
+```{r }
+
+pdf(file="Figures/Variable_pROIs_heatmap.pdf",width = 20, height = 8)
+draw(Heatmap(pROIs_lfq$Expr_filt_imp_scaled[var_prots_df[var_prots_df$Nr_occurrence ==6,"Protein"],], 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = T,
+             cluster_row_slices = F,
+             row_labels = var_prots_df[var_prots_df$Nr_occurrence ==6,"Gene"],
+             heatmap_width = unit(ncol(pROIs_lfq$Expr_filt_imp_scaled)*0.5, "cm"),
+             height = unit(length(var_prots_df[var_prots_df$Nr_occurrence ==6,"Protein"])*0.5, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_pROIs, 
+             show_column_names = T,
+             cluster_columns = T))
+dev.off()
+
+
+
+pdf(file="Figures/Variable_tROIs_heatmap.pdf",width = 20, height = 8)
+draw(Heatmap(tROIs$Expr_scaled[var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"],], 
+             name="Z-Score",
+             col=colorRamp2(c(-2,0,2), c("dodgerblue3","white", "firebrick3")),
+             cluster_rows = T, 
+             show_row_names = T,
+             cluster_row_slices = F,
+             row_labels = var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"],
+             heatmap_width = unit(ncol(tROIs$Expr_scaled)*0.5, "cm"),
+             height = unit(length(var_genes_df[var_genes_df$Nr_occurrence ==7,"Gene"])*0.5, "cm"),
+             cluster_column_slices = T,
+             show_row_dend = F,
+             top_annotation = colha_tROIs, 
+             show_column_names = T,
+             cluster_columns = T))
+dev.off()
+
+```
+
+# FN1 vs EMT
+
+
+```{r , fig.width=2, fig.height=1.5}
+
+FN1_EMT_pROI <- data.frame(FN1 = as.numeric(pROIs_lfq$Expr["P02751",
+                                                           !colnames(pROIs_lfq$Expr) %in% normal_pROIs]),
+                           EMT = as.numeric(pROIs_lfq$Singscores["HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION",!colnames(pROIs_lfq$Singscores) %in% normal_pROIs]))
+
+print(cor.test(FN1_EMT_pROI$FN1, FN1_EMT_pROI$EMT))
+g <- ggplot(FN1_EMT_pROI, aes(x=FN1, y=EMT)) +
+  geom_point()+
+  #geom_text_repel()+
+  theme_bw()+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method=lm) + ggtitle("pROIs")+xlab("FN1 expr")+ylab("EMT score")
+print(g)
+ggsave("Figures/FN1_vs_EMT_pROIs.pdf")
+
+FN1_EMT_tROI <- data.frame(FN1 = as.numeric(tROIs$Expr["FN1",!colnames(tROIs$Expr) %in% normal_tROIs]),
+                           EMT = as.numeric(tROIs$Singscores["HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION",!colnames(tROIs$Singscores) %in% normal_tROIs]))
+
+print(cor.test(FN1_EMT_tROI$FN1, FN1_EMT_tROI$EMT))
+g <- ggplot(FN1_EMT_tROI, aes(x=FN1, y=EMT)) +
+  geom_point()+
+  #geom_text_repel()+
+  theme_bw()+ theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  geom_smooth(method=lm) + ggtitle("tROIs")+xlab("FN1 expr")+ylab("EMT score")
+print(g)
+ggsave("Figures/FN1_vs_EMT_tROIs.pdf")
+
+
+```
+
+
+
+# ROI clustering based on FN1 
+
+```{r }
+hm_df <- as.matrix(pROIs_lfq$Expr[var_prots_df[var_prots_df$Gene %in% "FN1","Protein"], 
+                              !colnames(pROIs_lfq$Expr) %in% normal_pROIs])
+set.seed(123456)
+Heatmap(hm_df, cluster_rows = F,
+        column_km = 4)
+
+
+```
+
+```{r , fig.width=15}
+hm_df <- as.matrix(tROIs$Expr["FN1", 
+                              !colnames(tROIs$Expr) %in% normal_tROIs])
+set.seed(123456)
+Heatmap(hm_df, cluster_rows = F,
+        column_km = 4)
+
+
+```
+
+
+
+# TME estimations
+
+
+```{r }
+tROIs$TME_estimation_tumors_scaled <- t(scale(t(tROIs$TME_estimation[,tumor_tROIs])))
+
+
+tme <- apply(tROIs$TME_estimation, 1, median)
+tme[order(tme)]
+
+tme <- apply(tROIs$TME_estimation, 1, mean)
+tme[order(tme)]
+
+tme <- apply(tROIs$TME_estimation, 1, max)
+tme[order(tme)]
+```
+
+
+```{r , fig.width=15, fig.height=10}
+
+set.seed(12345)
+tme_clusters <- data.frame(Sample = row.names(tROIs$TME_estimation_tumors_scaled),
+                             Cluster = factor(kmeans(tROIs$TME_estimation_tumors_scaled,3)$cluster),
+                             row.names = row.names(tROIs$TME_estimation_tumors_scaled))
+
+
+colha_tROIs <- HeatmapAnnotation(df =tROIs$Sample_annot[colnames(tROIs$TME_estimation_tumors_scaled),
+                                                  c("Case", "Pathology", 
+                                                    "Immune score")],
+                                 which="col",
+                                 col=colorlist,
+                                 annotation_name_side = "left",
+                                 gp = gpar(col = "lightgrey"),
+                                 #gap = unit(c(2,2,2,2,2), 'mm'),
+                                 show_legend = TRUE,
+                                 show_annotation_name = TRUE)
+
+
+set.seed(123)
+draw(Heatmap(tROIs$TME_estimation_tumors_scaled, 
+        name="Z-score",
+        #col=colorRamp2(c(0,50,100,230), c("white","gold","orange", "firebrick3")),
+        col=colorRamp2(c(-2,0,2), c("steelblue","white", "firebrick3")),
+        cluster_columns =  T,
+        show_column_dend = T,
+        cluster_column_slices = T,
+        cluster_row_slices = T,
+        cluster_rows = T,
+        show_row_dend = T,
+        top_annotation = colha_tROIs,
+        row_split =  tme_clusters[row.names(tROIs$TME_estimation_tumors_scaled),"Cluster"],
+        column_km_repeats = 1000,
+        row_km_repeats = 1000,
+        column_names_gp = gpar(fontsize = 14),
+        row_names_gp = gpar(fontsize = 14),
+        width = unit(ncol(tROIs$TME_estimation_tumors_scaled)*0.4, "cm"),
+        height = unit(nrow(tROIs$TME_estimation_tumors_scaled)*0.5, "cm")),
+     heatmap_legend_side="left")
+
+
+```
+
+```{r }
+pdf(file="Figures/TME_heatmap.pdf",width = 15, height = 10)
+draw(Heatmap(tROIs$TME_estimation_tumors_scaled, 
+        name="Z-score",
+        #col=colorRamp2(c(0,50,100,230), c("white","gold","orange", "firebrick3")),
+        col=colorRamp2(c(-2,0,2), c("steelblue","white", "firebrick3")),
+        cluster_columns =  T,
+        show_column_dend = T,
+        cluster_column_slices = T,
+        cluster_row_slices = T,
+        cluster_rows = T,
+        show_row_dend = T,
+        top_annotation = colha_tROIs,
+        row_split =  tme_clusters[row.names(tROIs$TME_estimation_tumors_scaled),"Cluster"],
+        column_km_repeats = 1000,
+        row_km_repeats = 1000,
+        column_names_gp = gpar(fontsize = 14),
+        row_names_gp = gpar(fontsize = 14),
+        width = unit(ncol(tROIs$TME_estimation_tumors_scaled)*0.4, "cm"),
+        height = unit(nrow(tROIs$TME_estimation_tumors_scaled)*0.5, "cm")),
+     heatmap_legend_side="left")
+dev.off()
+```
+
+```{r }
+chart.Correlation(t(tROIs$TME_estimation_tumors_scaled[tme_clusters[tme_clusters$Cluster ==3,"Sample"],]), 
+                  histogram=TRUE, pch=19, method="spearman")
+
+pdf(file="Figures/TME_distinct_correlation.pdf",width = 5, height = 5)
+chart.Correlation(t(tROIs$TME_estimation_tumors_scaled[tme_clusters[tme_clusters$Cluster ==3,"Sample"],]), 
+                  histogram=TRUE, pch=19, method="spearman")
+dev.off()
+
+
+```
+
+
+
+```{r }
+
+```
+
+

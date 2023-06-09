@@ -1,0 +1,291 @@
+---
+title: "Overview of sample annotations, assess imputation in pROI data and draw PCA plots"
+author: "Bea Szeitz"
+output: html_notebook:
+  toc: yes
+---
+
+
+```{r ,include=FALSE}
+source("Load_packages.R")
+source("Utility_functions.R")
+source("Color_list.R")
+```
+
+
+
+```{r }
+loaded <- load("RData/Cleaned_input_files.RData")
+loaded
+
+```
+
+# General histology associations
+
+
+```{r }
+
+patients <- unique(pROIs_lfq$Sample_annot$Case)
+
+for (i in 1:length(patients)){
+  
+  print(patients[i])
+  print(mean(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case == patients[i],
+                                               "TIL"]), na.rm=T))
+  
+}
+
+for (i in 1:length(patients)){
+  
+  print(patients[i])
+  print(mean(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case == patients[i],
+                                               "Mucin"]), na.rm=T))
+  
+}
+
+for (i in 1:length(patients)){
+  
+  print(patients[i])
+  print(mean(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case == patients[i],
+                                               "Stroma"]), na.rm=T))
+  
+}
+
+
+for (i in 1:length(patients)){
+  
+  print(patients[i])
+  print(nrow(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case == patients[i],]))
+  
+}
+
+
+for (i in 1:length(patients)){
+  
+  print(patients[i])
+  print(mean(as.numeric(tROIs$Sample_annot[tROIs$Sample_annot$Case == patients[i],
+                                           "Immune_score"]), na.rm=T))
+  
+}
+
+```
+
+Compare stroma, mucin, TIL, immune score (1 value per patient):
+
+```{r , fig.width=3, fig.height=1.5}
+
+patient_avr <- data.frame(Case = patients,
+                              Avr_stroma = sapply(patients, function(x){
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==x,
+                                                                               "Stroma"])))
+                              }),
+                              Avr_mucin = sapply(patients, function(x){
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==x,
+                                                                               "Mucin"])))
+                              }),
+                              Avr_TIL = sapply(patients, function(x){
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==x,
+                                                                               "TIL"])))
+                              }),
+                              Avr_immunescore = sapply(patients, function(x){
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==x,
+                                                                               "Immune_score_avr"])))
+                              }),
+                          Avr_immunescore_alltROIs = sapply(patients, function(x){
+                                mean(na.omit(as.numeric(tROIs$Sample_annot[tROIs$Sample_annot$Case ==x,
+                                                                           "Immune_score"])))
+                              }))
+
+ggplot(patient_avr, aes(x=Avr_stroma, y = Avr_mucin))+
+  geom_point()+xlim(c(0,3))+ylim(c(0,3))#+geom_smooth(method="lm")
+
+ggplot(patient_avr, aes(x=Avr_immunescore, y = Avr_TIL))+
+  geom_point()#+geom_smooth(method="lm")
+
+cor.test(patient_avr$Avr_stroma, patient_avr$Avr_mucin, method = "spearman")
+cor.test(patient_avr$Avr_stroma, patient_avr$Avr_TIL, method = "spearman")
+cor.test(patient_avr$Avr_mucin, patient_avr$Avr_TIL, method = "spearman")
+cor.test(patient_avr$Avr_immunescore, patient_avr$Avr_TIL, method = "spearman")
+
+```
+
+
+Compare stroma, mucin, TIL, immune score vs morphology (averaged to 8 "samples" because Case3 has two morphologies):
+
+```{r , fig.width=3, fig.height=2}
+
+patient_per_morphology <- paste(pROIs_lfq$Sample_annot$Case, pROIs_lfq$Sample_annot$Pathology, sep="_")
+patient_per_morphology <- unique(patient_per_morphology[!grepl("normal",patient_per_morphology)])
+
+morphology_vs_others <- data.frame(Case = patient_per_morphology,
+                              Avr_stroma = sapply(patient_per_morphology, function(x){
+                                pat <- strsplit(x, split="_")[[1]][1]
+                                morph <- strsplit(x, split="_")[[1]][2]
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==pat & pROIs_lfq$Sample_annot$Pathology == morph,"Stroma"])))
+                              }),
+                              Avr_mucin = sapply(patient_per_morphology, function(x){
+                                pat <- strsplit(x, split="_")[[1]][1]
+                                morph <- strsplit(x, split="_")[[1]][2]
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==pat & pROIs_lfq$Sample_annot$Pathology == morph,"Mucin"])))
+                              }),
+                              Avr_TIL = sapply(patient_per_morphology, function(x){
+                                pat <- strsplit(x, split="_")[[1]][1]
+                                morph <- strsplit(x, split="_")[[1]][2]
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==pat& pROIs_lfq$Sample_annot$Pathology == morph,"TIL"])))
+                              }),
+                              Avr_immunescore = sapply(patient_per_morphology, function(x){
+                                pat <- strsplit(x, split="_")[[1]][1]
+                                morph <- strsplit(x, split="_")[[1]][2]
+                                mean(na.omit(as.numeric(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Case ==pat& pROIs_lfq$Sample_annot$Pathology == morph,"Immune_score_avr"])))
+                              }))
+
+morphology_vs_others$Morphology <- sapply(strsplit(morphology_vs_others$Case, split="_"),"[[",2)
+
+ggplot(morphology_vs_others, aes(x=Morphology, y = Avr_mucin))+
+  geom_boxplot()+geom_beeswarm()+stat_compare_means()
+
+ggplot(morphology_vs_others, aes(x=Morphology, y = Avr_stroma))+
+  geom_boxplot()+geom_beeswarm()+stat_compare_means()
+
+ggplot(morphology_vs_others, aes(x=Morphology, y = Avr_TIL))+
+  geom_boxplot()+geom_beeswarm()+stat_compare_means()
+
+ggplot(morphology_vs_others, aes(x=Morphology, y = Avr_immunescore))+
+  geom_boxplot()+geom_beeswarm()+stat_compare_means()
+
+
+```
+
+
+```{r , fig.width=4, fig.height=1.5}
+morphologies <- unique(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Pathology!="normal","Pathology"])
+
+morph_mucin <- data.frame(Pathology = rep(morphologies,4),
+                         Mucin = c(rep(0,length(morphologies)),
+                                   rep(1,length(morphologies)),
+                                   rep(2,length(morphologies)),
+                                   rep(3,length(morphologies))))
+
+for (i in 1:nrow(morph_mucin)){
+  
+  morph_mucin$Nr_ROIs[i] <- nrow(pROIs_lfq$Sample_annot[pROIs_lfq$Sample_annot$Pathology == morph_mucin$Pathology[i] & pROIs_lfq$Sample_annot$Mucin == morph_mucin$Mucin[i],])
+  
+}
+
+morph_mucin$Mucin <- factor(morph_mucin$Mucin, levels=c(3,2,1,0))
+morph_mucin$Pathology <- factor(morph_mucin$Pathology, levels=c("papillary", "tubular", "solid"))
+
+
+ggplot(morph_mucin, aes(x=Pathology, y=Nr_ROIs, fill=Mucin))+geom_bar(stat="identity",position=position_stack())+ scale_fill_grey()+theme_bw()+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+coord_flip()
+
+```
+
+
+
+```{r , fig.width=3, fig.height=2}
+cor.test(as.numeric(pROIs_lfq$Sample_annot$TIL),
+    as.numeric(pROIs_lfq$Sample_annot$Immune_score_avr), method = "spearman")
+
+ggplot(pROIs_lfq$Sample_annot, aes(x=as.numeric(TIL), y=as.numeric(Immune_score_avr)))+geom_beeswarm()+theme_bw()+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+geom_smooth(method="lm", color = "darkgrey")
+
+
+
+cor.test(as.numeric(pROIs_lfq$Sample_annot[as.numeric(pROIs_lfq$Sample_annot$TIL) > 15,"TIL"]),
+    as.numeric(pROIs_lfq$Sample_annot[as.numeric(pROIs_lfq$Sample_annot$TIL) > 15,"Immune_score_avr"]), 
+    method = "spearman")
+
+ggplot(pROIs_lfq$Sample_annot[as.numeric(pROIs_lfq$Sample_annot$TIL) > 15,], 
+       aes(x=as.numeric(TIL), y=as.numeric(Immune_score_avr)))+geom_beeswarm()
+
+
+```
+
+
+
+# Number of missing values
+
+```{r , fig.width=3, fig.height=2.5}
+
+nr_MVs <- merge(data.frame(Sample = colnames(pROIs_lfq$Expr_filt),
+                     Nr_imputed_values= apply(pROIs_lfq$Expr_filt, 2, function(x) {sum(is.na(x))})), 
+                pROIs_lfq$Sample_annot, by="Sample")
+nr_MVs$Label <- ifelse(nr_MVs$Nr_imputed_values > 100, nr_MVs$Sample, "")
+
+
+ggplot(nr_MVs, aes(x=Pathology,y=Nr_imputed_values, label=Label))+
+  geom_boxplot()+theme_bw()+ 
+  theme(panel.border = element_blank(), 
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), 
+        axis.line = element_line(colour = "black"))+
+  stat_compare_means()+geom_beeswarm()+geom_text_repel(seed = 12345)
+
+ggsave("Figures/Nr_MVs.pdf")
+
+
+
+```
+
+# PCA plots
+
+
+```{r , fig.width=5, fig.height=3}
+
+
+ggbiplot::ggbiplot(prcomp(t(tROIs$Expr[,tROIs$Sample_annot$Sample])),
+                   circle=F, scale = T, 
+                   groups = tROIs$Sample_annot$Case,
+                   ellipse = T,
+                   var.axes	=F) + 
+  ggtitle("tROIs")+geom_point(aes(color=tROIs$Sample_annot$Case))+
+  theme_bw()+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+                                       panel.grid.minor = element_blank(), 
+                    axis.line = element_line(colour = "black"))+
+  scale_color_manual(values=c("gold", "#A65628", 
+                              "#FF7F00", "#F781BF", 
+                              "darkblue", "#a1045a", "lightgreen"))
+
+
+ggsave("Figures/pca_trois.pdf")
+
+
+set.seed(12345)
+pROI_clusters <- data.frame(Sample = colnames(pROIs_lfq$Expr_filt),
+                             Cluster_before_imp = factor(kmeans(scale(t(na.omit(pROIs_lfq$Expr_filt))), 
+                                                                4, nstart = 100)$cluster),
+                             Cluster_after_imp = factor(kmeans(scale(t(na.omit(pROIs_lfq$Expr_filt_imp))), 
+                                                               4, nstart = 100)$cluster),
+                             row.names = colnames(pROIs_lfq$Expr_filt))
+
+ggbiplot::ggbiplot(prcomp(t(na.omit(pROIs_lfq$Expr_filt[,pROIs_lfq$Sample_annot$Sample]))),
+                   circle=F, scale = T, 
+                   groups = pROI_clusters[pROIs_lfq$Sample_annot$Sample,"Cluster_before_imp"],
+                   ellipse = T,
+                   var.axes	=F) + 
+  ggtitle("pROIs")+
+  theme_bw()+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+                                       panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+
+  scale_shape_manual(values=c(4,15))+scale_color_manual(values=c("#A65628", "#F781BF", "darkorange", "black"))
+
+
+ggsave("Figures/pca_prois_beforeimput.pdf")
+
+
+ggbiplot::ggbiplot(prcomp(t(na.omit(pROIs_lfq$Expr_filt_imp[,pROIs_lfq$Sample_annot$Sample]))),
+                   circle=F, scale = T, 
+                   groups = pROI_clusters[pROIs_lfq$Sample_annot$Sample,"Cluster_after_imp"],
+                   ellipse = T,
+                   var.axes	=F) + 
+  ggtitle("pROIs")+
+  theme_bw()+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+                                       panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))+
+  scale_shape_manual(values=c(4,15))+scale_color_manual(values=c("darkorange", "#A65628", "#F781BF", "black"))
+
+
+ggsave("Figures/pca_prois_afterimput.pdf")
+
+```
+
+
