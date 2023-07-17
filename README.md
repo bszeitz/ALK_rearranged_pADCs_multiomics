@@ -2,11 +2,11 @@
 
 **This repository contains the custom R code used for the analyses reported in:**
 
-**Szeitz B, et al. Spatially resolved proteomic and transcriptomic profiling of ALK-rearranged lung adenocarcinomas reveals key players in inter- and intratumoral heterogeneity. Manuscript submitted for publication.**
+**Szeitz, B.; Glasz, T.; Herold, Z.; Tóth, G.; Balbisi, M.; Fillinger, J.; Horváth, S.; Mohácsi, R.; Kwon, H.J.; Moldvay, J.; et al. Spatially Resolved Proteomic and Transcriptomic Profiling of Anaplastic Lymphoma Kinase-Rearranged Pulmonary Adenocarcinomas Reveals Key Players in Inter- and Intratumoral Heterogeneity. Int. J. Mol. Sci. 2023, 24, 11369. https://doi.org/10.3390/ijms241411369**
 
 ## Study summary
 
-In this study, we performed the spatial molecular profiling of 7 ALK-rearranged lung adenocarcinoma (pADC) samples using GeoMx digital spatial profiling ( = 84 smaller transcriptomic regions, tROIs) and label-free shotgun proteomics ( = 23 larger proteomic regions, pROIs). With this, we seek a better understanding of the inter- and intratumoral heterogeneity in ALK-driven pDACs.
+In this study, we performed the spatial molecular profiling of 7 ALK-rearranged pulmonary adenocarcinoma (pADC) samples using GeoMx digital spatial profiling ( = 84 smaller transcriptomic regions, tROIs) and label-free shotgun proteomics ( = 23 larger proteomic regions, pROIs). With this, we seek a better understanding of the inter- and intratumoral heterogeneity in ALK-driven pDACs.
 
 ## Scripts
 
